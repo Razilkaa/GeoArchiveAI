@@ -197,6 +197,8 @@ class JobWorker:
         forced = name in self.config.force
         if not forced and validator():
             record.update({"status": "completed", "cached": True, "finished_at": utc_now()})
+            record.pop("error", None)
+            record.pop("detail", None)
             self._event(name, "cache_hit")
             return True
         if requires_external and not self._external_allowed():
@@ -215,6 +217,7 @@ class JobWorker:
         record["started_at"] = utc_now()
         record["attempts"] = int(record.get("attempts", 0)) + 1
         record.pop("error", None)
+        record.pop("detail", None)
         self._event(name, "started")
         started = time.perf_counter()
         try:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import logging
 import os
 import tempfile
 import time
@@ -9,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel
 
 
@@ -17,6 +20,7 @@ MAX_BATCH_FILES = int(os.getenv("MAX_BATCH_FILES", "16"))
 DEVICE = os.getenv("OCR_DEVICE", "gpu:0")
 LANGUAGE = os.getenv("OCR_LANGUAGE", "ru")
 MODEL_NAME = os.getenv("OCR_MODEL", "PP-OCRv5")
+logger = logging.getLogger("geoarchive.ocr")
 
 
 class ServiceState:
@@ -87,18 +91,30 @@ async def _read_upload(upload: UploadFile) -> bytes:
     return payload
 
 
+def _write_normalized_image(payload: bytes, destination: Any) -> None:
+    """Decode supported raster formats and give Paddle a predictable RGB JPEG."""
+    with Image.open(io.BytesIO(payload)) as source:
+        source.seek(0)
+        image = ImageOps.exif_transpose(source).convert("RGB")
+        image.save(destination, format="JPEG", quality=95, optimize=True)
+
+
 async def _ocr_upload(upload: UploadFile) -> dict[str, Any]:
     payload = await _read_upload(upload)
-    suffix = Path(upload.filename or "page.jpg").suffix or ".jpg"
     async with state.semaphore:
-        with tempfile.NamedTemporaryFile(suffix=suffix) as handle:
-            handle.write(payload)
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as handle:
+            try:
+                _write_normalized_image(payload, handle)
+            except (OSError, UnidentifiedImageError) as error:
+                state.errors += 1
+                raise HTTPException(422, f"Unsupported image: {type(error).__name__}") from error
             handle.flush()
             started = time.perf_counter()
             try:
                 result = await asyncio.to_thread(_predict, Path(handle.name))
             except Exception as error:
                 state.errors += 1
+                logger.exception("OCR prediction failed for %s", upload.filename)
                 raise HTTPException(500, f"OCR failed: {type(error).__name__}: {error}") from error
             state.requests += 1
             state.pages += 1
@@ -125,7 +141,7 @@ async def lifespan(_: FastAPI):
     state.model = None
 
 
-app = FastAPI(title="GeoArchive PaddleOCR", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="GeoArchive PaddleOCR", version="1.1.0", lifespan=lifespan)
 
 
 @app.get("/health")

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import io
-import json
 import re
 import zipfile
 from pathlib import Path
@@ -17,12 +16,6 @@ from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
 PROJECT_ROOT = Path(r"C:\FINAM\Conference")
-BUNDLE_PATH = Path(
-    r"C:\Users\Finam\Documents\Codex\2026-07-13\new-chat\outputs\backend"
-    r"\report_384092_bundle.json"
-)
-INBOX = PROJECT_ROOT / "reports_inbox"
-RUNS_ROOT = PROJECT_ROOT / "runs"
 BACKEND_URL = "http://127.0.0.1:8765"
 DEMO_REPORT_ID = "384092"
 
@@ -80,11 +73,6 @@ st.markdown(
 )
 
 
-@st.cache_data
-def load_demo_bundle() -> dict:
-    return json.loads(BUNDLE_PATH.read_text(encoding="utf-8"))
-
-
 @st.cache_data(ttl=10)
 def discover_reports() -> dict[str, str]:
     response = api_session().get(f"{BACKEND_URL}/api/reports", timeout=10)
@@ -102,27 +90,6 @@ def discover_reports() -> dict[str, str]:
 
 @st.cache_data(ttl=10)
 def load_report_view(report_id: str) -> dict:
-    if report_id == DEMO_REPORT_ID:
-        bundle = dict(load_demo_bundle())
-        bundle["artifacts"] = list(bundle.get("artifacts", []))
-        map_result_path = RUNS_ROOT / report_id / "map_agent" / "result.json"
-        if map_result_path.exists():
-            try:
-                map_result = json.loads(map_result_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                map_result = {}
-            bundle["map_qc"] = map_result.get("metrics", {})
-            for artifact in map_result.get("artifacts", []):
-                media_type = str(artifact.get("media_type") or "")
-                bundle["artifacts"].append(
-                    {
-                        "id": f"map-agent:{artifact.get('name', 'artifact')}",
-                        "label": artifact.get("label") or artifact.get("name") or "Результат картографа",
-                        "type": "image" if media_type.startswith("image/") else "vector",
-                        "path": artifact.get("path"),
-                    }
-                )
-        return bundle
     session = api_session()
     status_response = session.get(f"{report_api_path(report_id)}/status", timeout=10)
     status_response.raise_for_status()
@@ -246,10 +213,9 @@ def submit_archive(upload) -> dict:
 
 
 def run_report(report_id: str, retry_failed: bool = False) -> dict:
-    force = ["ragflow"] if retry_failed else []
     response = api_session().post(
         f"{report_api_path(report_id)}/run",
-        json={"force": force},
+        json={"force": []},
         timeout=15,
     )
     response.raise_for_status()
