@@ -25,7 +25,9 @@ from page_router import route_pages
 from report_orchestrator import ReportOrchestrator
 
 
-CORE_STAGES = ("page_routing", "fast_ocr", "markdown", "ragflow", "agents", "bundle", "operator")
+CORE_STAGES = ("page_routing", "fast_ocr", "markdown", "ragflow", "bundle")
+OPTIONAL_STAGES = ("agents", "operator")
+ALL_STAGES = (*CORE_STAGES, *OPTIONAL_STAGES)
 
 
 @dataclass(slots=True)
@@ -42,6 +44,7 @@ class WorkerConfig:
     paddleocr: Path | None = None
     ocr_api_url: str | None = "http://127.0.0.1:18080"
     allow_external: bool = True
+    enable_enrichment: bool = False
     force: set[str] = field(default_factory=set)
 
 
@@ -95,6 +98,8 @@ class JobWorker:
         existing = _read_json(self.state_path)
         if isinstance(existing, dict) and existing.get("report_id") == self.report_id:
             existing.setdefault("stages", {})
+            for name in ALL_STAGES:
+                existing["stages"].setdefault(name, {"status": "pending", "attempts": 0})
             existing.setdefault("events", [])
             return existing
         return {
@@ -103,7 +108,7 @@ class JobWorker:
             "status": "pending",
             "created_at": utc_now(),
             "updated_at": utc_now(),
-            "stages": {name: {"status": "pending", "attempts": 0} for name in CORE_STAGES},
+            "stages": {name: {"status": "pending", "attempts": 0} for name in ALL_STAGES},
             "events": [],
         }
 
@@ -252,7 +257,7 @@ class JobWorker:
             self._save()
 
             routing_external = bool(load_manifest(self.manifest_path)["queues"].get("route_vlm"))
-            stages = (
+            stages = [
                 (
                     "page_routing",
                     self._routing_valid,
@@ -299,37 +304,48 @@ class JobWorker:
                     False,
                 ),
                 (
-                    "agents",
-                    self._agents_valid,
-                    lambda: run_agents(
-                        self.manifest_path,
-                        self._ragflow_path(),
-                        self.config.ragflow_token_file,
-                        self.config.credentials_file,
-                        self.config.agent_model,
-                        self.config.ragflow_base_url,
-                        self.config.proxy,
-                    ),
-                    True,
-                ),
-                (
                     "bundle",
                     self._bundle_valid,
                     lambda: build_bundle(
                         self.manifest_path,
                         self._ragflow_path(),
-                        self._agents_path(),
+                        self._agents_path() if self._agents_path().exists() else None,
                         self.run_dir / "map_agent" / "result.json",
                     ),
                     False,
                 ),
-                (
-                    "operator",
-                    lambda: False,
-                    lambda: ReportOrchestrator(self.manifest_path, workers=2).run(),
-                    False,
-                ),
-            )
+            ]
+            if self.config.enable_enrichment:
+                stages.insert(
+                    -1,
+                    (
+                        "agents",
+                        self._agents_valid,
+                        lambda: run_agents(
+                            self.manifest_path,
+                            self._ragflow_path(),
+                            self.config.ragflow_token_file,
+                            self.config.credentials_file,
+                            self.config.agent_model,
+                            self.config.ragflow_base_url,
+                            self.config.proxy,
+                        ),
+                        True,
+                    ),
+                )
+                stages.append(
+                    (
+                        "operator",
+                        lambda: False,
+                        lambda: ReportOrchestrator(self.manifest_path, workers=2).run(),
+                        False,
+                    )
+                )
+            else:
+                for name in OPTIONAL_STAGES:
+                    self.state["stages"][name]["status"] = "skipped"
+                    self.state["stages"][name]["reason"] = "optional_enrichment_disabled"
+                self._save()
             for name, validator, handler, external in stages:
                 if not self._run_stage(name, validator, handler, requires_external=external):
                     break
@@ -373,7 +389,8 @@ def main() -> None:
     parser.add_argument("--router-batch-size", type=int, default=12)
     parser.add_argument("--paddleocr", type=Path)
     parser.add_argument("--ocr-api-url", default="http://127.0.0.1:18080")
-    parser.add_argument("--force", action="append", choices=CORE_STAGES, default=[])
+    parser.add_argument("--force", action="append", choices=ALL_STAGES, default=[])
+    parser.add_argument("--enable-enrichment", action="store_true")
     args = parser.parse_args()
 
     if args.all_reports:
@@ -400,6 +417,7 @@ def main() -> None:
             router_batch_size=args.router_batch_size,
             paddleocr=args.paddleocr,
             ocr_api_url=args.ocr_api_url or None,
+            enable_enrichment=args.enable_enrichment,
             force=set(args.force),
         )
         state = JobWorker(manifest, config).run()

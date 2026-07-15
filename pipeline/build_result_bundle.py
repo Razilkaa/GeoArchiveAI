@@ -40,13 +40,17 @@ def source_index(manifest: dict[str, Any], agents: dict[str, Any]) -> list[dict[
 def build_bundle(
     manifest_path: Path,
     ragflow_path: Path,
-    agents_path: Path,
+    agents_path: Path | None = None,
     map_result_path: Path | None = None,
 ) -> Path:
     manifest = load_manifest(manifest_path)
     ragflow = json.loads(ragflow_path.read_text(encoding="utf-8"))
-    agent_payload = json.loads(agents_path.read_text(encoding="utf-8"))
-    agents = agent_payload["agents"]
+    agent_payload = (
+        json.loads(agents_path.read_text(encoding="utf-8"))
+        if agents_path is not None and agents_path.exists()
+        else {"agents": {}, "verification_queue": []}
+    )
+    agents = agent_payload.get("agents", {})
     failed = [name for name, value in agents.items() if value.get("status") != "completed"]
     review = [name for name, value in agents.items() if value.get("evidence_qc", {}).get("status") == "review"]
     output = manifest_path.parent / "result_bundle.json"
@@ -73,7 +77,7 @@ def build_bundle(
             "manifest": str(manifest_path),
             "ocr_markdown": str(manifest_path.parent / f"report_{manifest['report_id']}_fast_ocr.md"),
             "ragflow": str(ragflow_path),
-            "agents": str(agents_path),
+            "agents": str(agents_path) if agents_path is not None and agents_path.exists() else None,
         },
     }
     if map_result_path and map_result_path.exists():

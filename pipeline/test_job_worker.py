@@ -39,6 +39,14 @@ class JobWorkerTest(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(worker.state["stages"]["agents"]["status"], "completed")
 
+    def test_optional_enrichment_is_disabled_by_default(self):
+        with tempfile.TemporaryDirectory() as temp:
+            worker = self._worker(Path(temp))
+
+        self.assertFalse(worker.config.enable_enrichment)
+        self.assertIn("agents", worker.state["stages"])
+        self.assertIn("operator", worker.state["stages"])
+
     def test_report_lock_rejects_second_worker(self):
         with tempfile.TemporaryDirectory() as temp:
             run = Path(temp)
