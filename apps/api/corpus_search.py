@@ -29,13 +29,18 @@ def report_id_from_document(name: str | None) -> str | None:
     return match.group(1) if match else None
 
 
+def document_batches(document_ids: list[str], size: int = 40) -> list[list[str]]:
+    unique = list(dict.fromkeys(document_ids))
+    return [unique[index:index + size] for index in range(0, len(unique), size)]
+
+
 class CorpusSearchService:
     def __init__(
         self,
         configs: list[ReportConfig],
         retrievers: list[Any] | None = None,
         llm: OpenAI | None = None,
-        workers: int = 24,
+        workers: int = 6,
     ) -> None:
         if not configs:
             raise ValueError("No report configs for corpus search")
@@ -45,7 +50,7 @@ class CorpusSearchService:
             proxy = os.environ.get("RAGFLOW_PROXY", "socks5h://127.0.0.1:7777")
             if proxy.lower() in {"", "none", "off"}:
                 proxy = None
-            retrievers = []
+            grouped_documents: dict[tuple[str, str], list[str]] = {}
             for config in configs:
                 metadata = json.loads(config.ragflow_metadata_path.read_text(encoding="utf-8"))
                 state = metadata.get("document_state", {})
@@ -60,10 +65,15 @@ class CorpusSearchService:
                         if item.get("document_id")
                     ]
                 if dataset_id and document_ids:
+                    key = (str(dataset_id), read_token(config.ragflow_token_path))
+                    grouped_documents.setdefault(key, []).extend(document_ids)
+            retrievers = []
+            for (dataset_id, token), document_ids in grouped_documents.items():
+                for batch in document_batches(document_ids):
                     retrievers.append(RagflowClient(
-                        token=read_token(config.ragflow_token_path),
-                        dataset_id=str(dataset_id),
-                        document_ids=document_ids,
+                        token=token,
+                        dataset_id=dataset_id,
+                        document_ids=batch,
                         proxy_url=proxy,
                     ))
         if not retrievers:

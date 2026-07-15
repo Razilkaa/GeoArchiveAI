@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from corpus_search import CorpusSearchService, report_id_from_document
+from corpus_search import CorpusSearchService, document_batches, report_id_from_document
 from rag_service import ReportConfig
 
 
@@ -69,6 +69,13 @@ class CorpusSearchTest(unittest.TestCase):
     def test_document_name_maps_to_report(self):
         name = "report_377069_fast_ocr_part_002_0fe803101a03.md"
         self.assertEqual(report_id_from_document(name), "377069")
+
+    def test_document_ids_are_deduplicated_and_batched(self):
+        ids = [f"doc-{index}" for index in range(85)] + ["doc-1"]
+
+        batches = document_batches(ids)
+
+        self.assertEqual([len(batch) for batch in batches], [40, 40, 5])
 
     def test_top_chunks_are_merged_before_single_generation(self):
         llm = FakeLlm()
