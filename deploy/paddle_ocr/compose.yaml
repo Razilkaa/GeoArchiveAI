@@ -1,0 +1,32 @@
+services:
+  paddle-ocr:
+    build: .
+    image: geoarchive/paddle-ocr:3.1.0
+    container_name: geoarchive-paddle-ocr
+    restart: unless-stopped
+    ports:
+      - "18080:8080"
+    environment:
+      OCR_DEVICE: gpu:0
+      OCR_LANGUAGE: ru
+      OCR_MODEL: PP-OCRv5
+      OCR_CONCURRENCY: "1"
+      MAX_FILE_BYTES: "41943040"
+      MAX_BATCH_FILES: "16"
+      NVIDIA_VISIBLE_DEVICES: "1"
+    volumes:
+      - ./models:/root/.paddlex
+    shm_size: 8gb
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
+      interval: 20s
+      timeout: 8s
+      retries: 15
+      start_period: 180s
