@@ -150,6 +150,9 @@ def main() -> None:
         raise SystemExit("At least two exact labelled profiles are required")
 
     inventory = gpd.read_file(args.inventory)
+    # The archive uses the no-zone-prefix 19N convention expected by Petrel.
+    # EPSG:2509 is mathematically equivalent, but obscures the actual GK zone.
+    inventory = inventory.set_crs("EPSG:28479", allow_override=True)
     inventory["N_PROF"] = inventory["N_PROF"].astype(str).str.strip()
     world_lines = {
         row.N_PROF: np.asarray(row.geometry.coords, dtype=float)[:, :2]
@@ -232,7 +235,7 @@ def main() -> None:
     ax.set_xlim(min_x - margin_x, max_x + margin_x)
     ax.set_ylim(min_y - margin_y, max_y + margin_y)
     ax.set_title(
-        f"Sheet 23 provisional georeference | EPSG:2509 | RMS {selected['rms_m']:.0f} m | REVIEW"
+        f"Sheet 23 provisional georeference | EPSG:28479 | RMS {selected['rms_m']:.0f} m | REVIEW"
     )
     ax.legend(loc="best")
     fig.tight_layout()

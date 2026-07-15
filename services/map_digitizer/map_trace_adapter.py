@@ -69,6 +69,9 @@ def build_map_result(
     georeference_path = trace_dir / "georeference_qc.json"
     georeferenced_preview_path = trace_dir / "georeference_preview.png"
     geopackage_path = trace_dir / "sheet_23_provisional.gpkg"
+    grid_preview_path = trace_dir / "sheet_23_horizon_k_gk42_21n.png"
+    grid_21n_path = trace_dir / "sheet_23_horizon_k_gk42_21n.cps3"
+    grid_19n_path = trace_dir / "sheet_23_horizon_k_gk42_19n.cps3"
 
     valued = load_json(valued_path)
     crosscheck = load_json(crosscheck_path)
@@ -136,7 +139,31 @@ def build_map_result(
     }
 
     if georeference and georeferenced_preview_path.exists() and geopackage_path.exists():
-        artifacts = [
+        artifacts = []
+        if grid_preview_path.exists() and grid_21n_path.exists() and grid_19n_path.exists():
+            artifacts.extend(
+                [
+                    {
+                        "name": "surface_grid_preview",
+                        "label": "Поверхность горизонта K · ГК-42 21N · требует проверки",
+                        "path": str(grid_preview_path.resolve()),
+                        "media_type": "image/png",
+                    },
+                    {
+                        "name": "surface_grid_21n",
+                        "label": "CPS-3 Grid для Petrel · ГК-42 21N (EPSG:28481)",
+                        "path": str(grid_21n_path.resolve()),
+                        "media_type": "application/x-cps3-grid",
+                    },
+                    {
+                        "name": "surface_grid_19n",
+                        "label": "CPS-3 Grid в исходной ГК-42 19N (EPSG:28479)",
+                        "path": str(grid_19n_path.resolve()),
+                        "media_type": "application/x-cps3-grid",
+                    },
+                ]
+            )
+        artifacts.extend([
             {
                 "name": "georeferenced_preview",
                 "label": "Геопривязанная карта, лист 23 · требует проверки",
@@ -145,11 +172,11 @@ def build_map_result(
             },
             {
                 "name": "geopackage",
-                "label": "Слои карты в GeoPackage (EPSG:2509)",
+                "label": "Слои карты в GeoPackage (ГК-42 19N)",
                 "path": str(geopackage_path.resolve()),
                 "media_type": "application/geopackage+sqlite3",
             },
-        ]
+        ])
     else:
         artifacts = [
             {

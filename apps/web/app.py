@@ -428,7 +428,7 @@ with materials_tab:
                 st.warning(f"Предпросмотр недоступен: {Path(artifact['path']).name}")
         for artifact in digitized_maps:
             path = Path(str(artifact.get("path") or ""))
-            if path.suffix.casefold() in {".geojson", ".json", ".gpkg"}:
+            if path.suffix.casefold() in {".geojson", ".json", ".gpkg", ".cps3", ".xyz", ".prj"}:
                 st.download_button(
                     artifact.get("label") or path.name,
                     data=path.read_bytes(),

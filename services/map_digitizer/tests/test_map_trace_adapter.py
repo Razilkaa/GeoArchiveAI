@@ -73,6 +73,9 @@ class MapTraceAdapterTest(unittest.TestCase):
             (root / "combined_23.png").write_bytes(b"png")
             (root / "georeference_preview.png").write_bytes(b"png")
             (root / "sheet_23_provisional.gpkg").write_bytes(b"gpkg")
+            (root / "sheet_23_horizon_k_gk42_21n.png").write_bytes(b"png")
+            (root / "sheet_23_horizon_k_gk42_21n.cps3").write_bytes(b"cps3")
+            (root / "sheet_23_horizon_k_gk42_19n.cps3").write_bytes(b"cps3")
             (root / "georeference_qc.json").write_text(
                 json.dumps(
                     {
@@ -115,7 +118,13 @@ class MapTraceAdapterTest(unittest.TestCase):
             self.assertEqual(payload["metrics"]["georeference_rms_m"], 73.48)
             self.assertEqual(
                 [item["name"] for item in payload["artifacts"]],
-                ["georeferenced_preview", "geopackage"],
+                [
+                    "surface_grid_preview",
+                    "surface_grid_21n",
+                    "surface_grid_19n",
+                    "georeferenced_preview",
+                    "geopackage",
+                ],
             )
 
 
