@@ -10,6 +10,15 @@ from app.config import settings
 
 
 BASE_STAGES = ("page_routing", "fast_ocr", "markdown", "ragflow", "bundle")
+MEDIA_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".bmp": "image/bmp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".pdf": "application/pdf",
+}
 
 
 def read_json(path: Path, default: Any = None) -> Any:
@@ -115,7 +124,7 @@ def map_payload(report_id: str) -> dict[str, Any]:
                 "page_id": page.get("id"),
                 "label": f"Исходная карта · {Path(str(page.get('relative_path') or '')).name}",
                 "path": str(path),
-                "media_type": f"image/{path.suffix.casefold().lstrip('.') or 'jpeg'}",
+                "media_type": MEDIA_TYPES.get(path.suffix.casefold(), "application/octet-stream"),
                 "exists": path.exists(),
             }
         )

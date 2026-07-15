@@ -96,7 +96,23 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()["sources"]), 1)
         self.assertEqual(response.json()["sources"][0]["page_id"], "page:00001")
+        self.assertEqual(response.json()["sources"][0]["media_type"], "image/jpeg")
         self.assertEqual(response.json()["status"], "not_digitized")
+
+    def test_maps_endpoint_reports_pdf_media_type(self):
+        directory = self.runs / "375392"
+        source = directory / "map.pdf"
+        source.write_bytes(b"%PDF-1.4")
+        manifest = json.loads((directory / "job.json").read_text(encoding="utf-8"))
+        manifest["pages"] = [
+            {"id": "page:00001", "relative_path": "map.pdf", "content_type": "map"},
+        ]
+        (directory / "job.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+        response = self.client.get("/api/reports/375392/maps")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["sources"][0]["media_type"], "application/pdf")
 
     @patch("app.routers.reports.reconcile_now")
     def test_scan_registers_and_starts_reports(self, reconcile):

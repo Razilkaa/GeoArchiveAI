@@ -10,10 +10,9 @@ from urllib.parse import quote
 import pandas as pd
 import requests
 import streamlit as st
-from PIL import Image
 
+from media import image_preview as load_image_preview
 
-Image.MAX_IMAGE_PIXELS = None
 
 PROJECT_ROOT = Path(r"C:\FINAM\Conference")
 BACKEND_URL = "http://127.0.0.1:8765"
@@ -145,14 +144,8 @@ def load_processing_state(report_id: str) -> dict:
 
 
 @st.cache_data
-def image_preview(path: str, max_size: tuple[int, int] = (1800, 1100)) -> Image.Image | None:
-    candidate = Path(path)
-    if not candidate.exists():
-        return None
-    with Image.open(candidate) as source:
-        image = source.convert("RGB")
-        image.thumbnail(max_size)
-        return image.copy()
+def image_preview(path: str, max_size: tuple[int, int] = (1800, 1100)):
+    return load_image_preview(path, max_size)
 
 
 def clean_filename(name: str) -> str:
@@ -400,6 +393,8 @@ with materials_tab:
             preview = image_preview(source["path"])
             if preview is not None:
                 st.image(preview, caption=source["label"], width="stretch")
+            else:
+                st.warning(f"Предпросмотр недоступен: {Path(source['path']).name}")
     with digitized_column:
         st.subheader("Оцифрованные карты")
         image_maps = [item for item in digitized_maps if str(item.get("media_type", "")).startswith("image/")]
@@ -409,6 +404,8 @@ with materials_tab:
             preview = image_preview(artifact["path"])
             if preview is not None:
                 st.image(preview, caption=artifact.get("label") or artifact.get("name"), width="stretch")
+            else:
+                st.warning(f"Предпросмотр недоступен: {Path(artifact['path']).name}")
         for artifact in digitized_maps:
             path = Path(str(artifact.get("path") or ""))
             if path.suffix.casefold() in {".geojson", ".json", ".gpkg"}:

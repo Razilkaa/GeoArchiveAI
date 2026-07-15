@@ -1,6 +1,7 @@
 streamlit>=1.36
 pandas
 pillow
+pymupdf
 requests
 openai
 fastapi>=0.115,<1
