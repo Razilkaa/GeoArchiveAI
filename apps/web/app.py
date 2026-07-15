@@ -144,8 +144,16 @@ def load_processing_state(report_id: str) -> dict:
 
 
 @st.cache_data
-def image_preview(path: str, max_size: tuple[int, int] = (1800, 1100)):
+def _cached_image_preview(
+    path: str, modified_ns: int, max_size: tuple[int, int] = (1800, 1100)
+):
     return load_image_preview(path, max_size)
+
+
+def image_preview(path: str, max_size: tuple[int, int] = (1800, 1100)):
+    source = Path(path)
+    modified_ns = source.stat().st_mtime_ns if source.exists() else 0
+    return _cached_image_preview(path, modified_ns, max_size)
 
 
 def clean_filename(name: str) -> str:

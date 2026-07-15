@@ -131,6 +131,36 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["sources"][0]["media_type"], "application/pdf")
 
+    def test_maps_endpoint_includes_source_selected_by_map_agent(self):
+        directory = self.runs / "375392"
+        source = directory / "missed-by-router.jpg"
+        source.write_bytes(b"image")
+        map_agent = directory / "map_agent"
+        map_agent.mkdir()
+        (map_agent / "result.json").write_text(
+            json.dumps(
+                {
+                    "status": "completed",
+                    "artifacts": [
+                        {
+                            "name": "source_map",
+                            "label": "Исходная структурная карта",
+                            "path": str(source),
+                            "media_type": "image/jpeg",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        response = self.client.get("/api/reports/375392/maps")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["sources"]), 1)
+        self.assertEqual(response.json()["sources"][0]["path"], str(source))
+
     @patch("app.routers.reports.reconcile_now")
     def test_scan_registers_and_starts_reports(self, reconcile):
         reconcile.return_value = {

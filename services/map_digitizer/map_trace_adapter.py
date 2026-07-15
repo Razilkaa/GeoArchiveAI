@@ -66,6 +66,9 @@ def build_map_result(
     crosscheck_path = trace_dir / "crosscheck_23.json"
     geojson_path = trace_dir / "isolines_23.geojson"
     preview_path = trace_dir / "combined_23.png"
+    georeference_path = trace_dir / "georeference_qc.json"
+    georeferenced_preview_path = trace_dir / "georeference_preview.png"
+    geopackage_path = trace_dir / "sheet_23_provisional.gpkg"
 
     valued = load_json(valued_path)
     crosscheck = load_json(crosscheck_path)
@@ -85,6 +88,7 @@ def build_map_result(
     disagreements = verdicts["flagged"]
     closures = sum(bool(item.get("properties", {}).get("closed")) for item in features)
     crossing_pairs = crossing_isoline_pairs(features)
+    georeference = load_json(georeference_path) if georeference_path.exists() else None
 
     reasons = []
     if ratio(profile_leaks, candidate_count) > 0.1:
@@ -100,8 +104,15 @@ def build_map_result(
 
     metrics = {
         "quality_status": "review" if reasons else "pass",
-        "coordinate_system": "image_pixels",
-        "georeferenced": False,
+        "coordinate_system": georeference.get("crs") if georeference else "image_pixels",
+        "georeferenced": bool(georeference),
+        "georeference_status": georeference.get("status") if georeference else "missing",
+        "georeference_rms_m": (
+            georeference.get("selected_solution", {}).get("rms_m") if georeference else None
+        ),
+        "georeference_ambiguity_ratio": (
+            georeference.get("ambiguity_ratio") if georeference else None
+        ),
         "candidate_polylines": candidate_count,
         "isoline_features": isoline_count,
         "profile_leaks": profile_leaks,
@@ -124,26 +135,36 @@ def build_map_result(
         "source_breakdown": dict(sources),
     }
 
-    artifacts = [
-        {
-            "name": "trace_preview",
-            "label": "Изолинии и контрольная поверхность, лист 23",
-            "path": str(preview_path.resolve()),
-            "media_type": "image/png",
-        },
-        {
-            "name": "pixel_isolines",
-            "label": "Векторные изолинии в пикселях (без геопривязки)",
-            "path": str(geojson_path.resolve()),
-            "media_type": "application/geo+json",
-        },
-        {
-            "name": "trace_qc",
-            "label": "Метрики контроля трассировки",
-            "path": str(crosscheck_path.resolve()),
-            "media_type": "application/json",
-        },
-    ]
+    if georeference and georeferenced_preview_path.exists() and geopackage_path.exists():
+        artifacts = [
+            {
+                "name": "georeferenced_preview",
+                "label": "Геопривязанная карта, лист 23 · требует проверки",
+                "path": str(georeferenced_preview_path.resolve()),
+                "media_type": "image/png",
+            },
+            {
+                "name": "geopackage",
+                "label": "Слои карты в GeoPackage (EPSG:2509)",
+                "path": str(geopackage_path.resolve()),
+                "media_type": "application/geopackage+sqlite3",
+            },
+        ]
+    else:
+        artifacts = [
+            {
+                "name": "trace_preview",
+                "label": "Изолинии и контрольная поверхность, лист 23",
+                "path": str(preview_path.resolve()),
+                "media_type": "image/png",
+            },
+            {
+                "name": "pixel_isolines",
+                "label": "Векторные изолинии в пикселях (без геопривязки)",
+                "path": str(geojson_path.resolve()),
+                "media_type": "application/geo+json",
+            },
+        ]
     if source_image and source_image.exists():
         artifacts.insert(
             0,

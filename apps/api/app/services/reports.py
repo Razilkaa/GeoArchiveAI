@@ -133,6 +133,19 @@ def map_payload(report_id: str) -> dict[str, Any]:
     digitized = []
     for artifact in result.get("artifacts", []):
         if artifact.get("name") == "source_map":
+            path = Path(str(artifact.get("path") or ""))
+            if path.exists() and not any(item["path"] == str(path) for item in sources):
+                sources.insert(
+                    0,
+                    {
+                        "page_id": None,
+                        "label": artifact.get("label") or f"Исходная карта · {path.name}",
+                        "path": str(path),
+                        "media_type": artifact.get("media_type")
+                        or MEDIA_TYPES.get(path.suffix.casefold(), "application/octet-stream"),
+                        "exists": True,
+                    }
+                )
             continue
         path = Path(str(artifact.get("path") or ""))
         digitized.append(

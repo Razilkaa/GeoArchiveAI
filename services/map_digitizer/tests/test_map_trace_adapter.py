@@ -67,6 +67,57 @@ class MapTraceAdapterTest(unittest.TestCase):
             self.assertEqual(payload["metrics"]["crossing_pair_ids"], [[2, 3]])
             self.assertTrue(output.exists())
 
+    def test_exposes_provisional_georeferenced_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "combined_23.png").write_bytes(b"png")
+            (root / "georeference_preview.png").write_bytes(b"png")
+            (root / "sheet_23_provisional.gpkg").write_bytes(b"gpkg")
+            (root / "georeference_qc.json").write_text(
+                json.dumps(
+                    {
+                        "status": "review",
+                        "crs": "EPSG:2509",
+                        "selected_solution": {"rms_m": 73.48},
+                        "ambiguity_ratio": 1.278,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "valued_isolines_23.json").write_text(
+                json.dumps({"n_polylines": 1, "n_valued": 1, "profile_leaks": []}),
+                encoding="utf-8",
+            )
+            (root / "crosscheck_23.json").write_text(
+                json.dumps({"verdicts": {"0": "main"}, "from_surface": {}, "structures": []}),
+                encoding="utf-8",
+            )
+            (root / "isolines_23.geojson").write_text(
+                json.dumps(
+                    {
+                        "type": "FeatureCollection",
+                        "features": [
+                            {
+                                "type": "Feature",
+                                "geometry": {"type": "LineString", "coordinates": [[0, 0], [1, 1]]},
+                                "properties": {"id": 0, "kind": "isoline", "source": "label"},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            payload = build_map_result("demo", root, root / "result.json")
+
+            self.assertTrue(payload["metrics"]["georeferenced"])
+            self.assertEqual(payload["metrics"]["coordinate_system"], "EPSG:2509")
+            self.assertEqual(payload["metrics"]["georeference_rms_m"], 73.48)
+            self.assertEqual(
+                [item["name"] for item in payload["artifacts"]],
+                ["georeferenced_preview", "geopackage"],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
