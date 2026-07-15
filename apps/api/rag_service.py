@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import copy
 import json
-import math
 import os
 import re
 import time
-from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -91,7 +89,7 @@ def cited_page_numbers(answer: str) -> set[int]:
 
 
 def retrieval_source(transport: str | None, suffix: str = "") -> str:
-    base = "ragflow" if transport in {"ragflow", "proxy", "direct"} else "local_bm25"
+    base = "ragflow"
     return f"{base}_{suffix}" if suffix else base
 
 
@@ -188,7 +186,7 @@ class RagflowClient:
                 {
                     "rank": rank,
                     "similarity": round(float(chunk.get("similarity") or 0.0), 4),
-                    "document_name": chunk.get("document_name"),
+                    "document_name": chunk.get("document_name") or chunk.get("document_keyword"),
                     "evidence": page_ids(content),
                     "excerpt": clean_content(content),
                     "raw_content": content,
@@ -202,79 +200,9 @@ class RagflowClient:
         }
 
 
-class LocalCorpusRetriever:
-    def __init__(self, corpus_path: Path) -> None:
-        pages: dict[int, list[str]] = defaultdict(list)
-        for line in corpus_path.read_text(encoding="utf-8").replace("\r", "").splitlines():
-            match = SOURCE_PAGE_RE.search(line)
-            if match is None:
-                continue
-            cleaned = SOURCE_PAGE_RE.sub("", line).strip()
-            if cleaned:
-                page = int(match.group("legacy") or match.group("current"))
-                pages[page].append(cleaned)
-        self.documents = [
-            {
-                "page": page,
-                "text": "\n".join(lines),
-                "terms": Counter(tokens("\n".join(lines))),
-            }
-            for page, lines in sorted(pages.items())
-        ]
-        doc_frequency: Counter[str] = Counter()
-        for document in self.documents:
-            doc_frequency.update(document["terms"].keys())
-        count = max(1, len(self.documents))
-        self.idf = {
-            term: math.log(1 + (count - frequency + 0.5) / (frequency + 0.5))
-            for term, frequency in doc_frequency.items()
-        }
-        self.average_length = (
-            sum(sum(document["terms"].values()) for document in self.documents) / count
-        )
-
-    def retrieve(self, question: str, limit: int = 5) -> dict[str, Any]:
-        started = time.perf_counter()
-        query_terms = Counter(tokens(question))
-        scored = []
-        for document in self.documents:
-            length = sum(document["terms"].values())
-            score = 0.0
-            for term, query_weight in query_terms.items():
-                frequency = document["terms"].get(term, 0)
-                if not frequency:
-                    continue
-                denominator = frequency + 1.5 * (
-                    0.25 + 0.75 * length / max(1.0, self.average_length)
-                )
-                score += self.idf.get(term, 0.0) * frequency * 2.5 / denominator * query_weight
-            if score > 0:
-                scored.append((score, document))
-        scored.sort(key=lambda item: (-item[0], item[1]["page"]))
-        top = scored[:limit]
-        max_score = top[0][0] if top else 1.0
-        chunks = [
-            {
-                "rank": rank,
-                "similarity": round(score / max_score, 4),
-                "document_name": self.documents and "local_provenance_corpus",
-                "evidence": [f"text:{document['page']:05d}"],
-                "excerpt": clean_content(document["text"]),
-                "raw_content": document["text"],
-            }
-            for rank, (score, document) in enumerate(top, start=1)
-        ]
-        return {
-            "chunks": chunks,
-            "total": len(scored),
-            "latency_ms": round((time.perf_counter() - started) * 1000),
-            "transport": "local_bm25",
-        }
-
-
 def extractive_answer(chunks: list[dict[str, Any]]) -> str:
     if not chunks:
-        return "В локальном корпусе не найдено достаточно данных для ответа."
+        return "В RAGFlow не найдено достаточно данных для ответа."
     parts = ["Внешняя модель недоступна. Наиболее релевантные фрагменты отчёта:"]
     for chunk in chunks[:2]:
         page = int(chunk["evidence"][0].split(":")[1])
@@ -309,7 +237,6 @@ class ReportAnswerService:
             document_ids=document_ids,
             proxy_url=proxy,
         )
-        self.local_retriever = LocalCorpusRetriever(config.local_corpus_path)
         credentials = read_key_values(config.llm_credentials_path)
         self.model = os.environ.get("DEMO_LLM_MODEL", "openai/gpt-4o-mini")
         self.llm = llm or OpenAI(
@@ -350,13 +277,7 @@ class ReportAnswerService:
             cached["cache_hit"] = True
             return cached
 
-        try:
-            retrieved = self.ragflow.retrieve(question)
-        except requests.RequestException:
-            allow_local = os.environ.get("ALLOW_LOCAL_RETRIEVAL_FALLBACK", "true").casefold()
-            if allow_local not in {"1", "true", "yes", "on"}:
-                raise
-            retrieved = self.local_retriever.retrieve(question)
+        retrieved = self.ragflow.retrieve(question)
         transport = retrieved.get("transport")
         chunks = retrieved["chunks"]
         if not chunks:

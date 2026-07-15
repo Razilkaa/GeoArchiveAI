@@ -7,7 +7,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from rag_service import (
-    LocalCorpusRetriever,
     RagflowClient,
     ReportAnswerService,
     ReportConfig,
@@ -116,27 +115,33 @@ class RagServiceTest(unittest.TestCase):
         self.assertEqual(session.request_json["dataset_ids"], ["dataset"])
         self.assertEqual(session.request_json["document_ids"], ["doc-1", "doc-2"])
 
+    def test_ragflow_document_keyword_is_exposed_as_document_name(self):
+        session = FakeSession()
+        session.post = lambda _url, **kwargs: SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"code": 0, "data": {"chunks": [{
+                "document_keyword": "report_377069_fast_ocr_part_001_deadbeef.md",
+                "content": "[SOURCE_PAGE: page:00031] Приток нефти.",
+                "similarity": 0.8,
+            }], "total": 1}},
+        )
+        client = RagflowClient(
+            token="token", dataset_id="dataset", document_ids=["doc-1"],
+            proxy_url=None, session=session,
+        )
+
+        result = client.retrieve("приток нефти")
+
+        self.assertEqual(
+            result["chunks"][0]["document_name"],
+            "report_377069_fast_ocr_part_001_deadbeef.md",
+        )
+
     def test_grouped_citations_are_parsed(self):
         self.assertEqual(cited_page_numbers("Ответ [стр. 3, 154; 115]."), {3, 115, 154})
 
     def test_proxy_transport_is_reported_as_ragflow(self):
         self.assertEqual(retrieval_source("proxy", "retrieval"), "ragflow_retrieval")
-
-    def test_local_retrieval_matches_russian_inflection(self):
-        retriever = LocalCorpusRetriever(self.config.local_corpus_path)
-        result = retriever.retrieve("Какие горизонты изучались?")
-        self.assertEqual(result["chunks"][0]["evidence"], ["text:00014"])
-
-    def test_local_retrieval_reads_current_markdown_marker(self):
-        self.config.local_corpus_path.write_text(
-            "[SOURCE_PAGE: page:00014; path=scan.tif] Скважина 410 испытана.",
-            encoding="utf-8",
-        )
-        retriever = LocalCorpusRetriever(self.config.local_corpus_path)
-
-        result = retriever.retrieve("Какая скважина испытана?")
-
-        self.assertEqual(result["chunks"][0]["evidence"], ["text:00014"])
 
     def test_valid_citation_passes_qc(self):
         service = ReportAnswerService(
