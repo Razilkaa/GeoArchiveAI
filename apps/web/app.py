@@ -110,19 +110,8 @@ def load_report_view(report_id: str) -> dict:
             group = plural.get(entity.get("entity_type"))
             if group:
                 groups[group].append({"name": entity.get("name", ""), **entity.get("attributes", {})})
-    artifact_response = session.get(f"{report_api_path(report_id)}/artifacts", timeout=10)
-    artifacts = []
-    if artifact_response.ok:
-        for index, artifact in enumerate(artifact_response.json().get("artifacts", [])):
-            media_type = str(artifact.get("media_type") or "")
-            artifacts.append(
-                {
-                    "id": f"{report_id}:{index}",
-                    "label": artifact.get("label") or artifact.get("name") or "Материал",
-                    "type": "source_scan" if media_type.startswith("image/") else "vector",
-                    "path": artifact.get("path"),
-                }
-            )
+    map_response = session.get(f"{report_api_path(report_id)}/maps", timeout=10)
+    maps = map_response.json() if map_response.ok else {"sources": [], "digitized": [], "metrics": {}}
     return {
         "report": {
             "id": report_id,
@@ -138,14 +127,8 @@ def load_report_view(report_id: str) -> dict:
             "horizons": len(groups["horizons"]),
         },
         "entities": groups,
-        "artifacts": artifacts,
-        "map_qc": result.get("map", {}).get("metrics", {}),
+        "maps": maps,
     }
-
-
-def load_operator_state(report_id: str) -> dict:
-    response = api_session().get(f"{report_api_path(report_id)}/status", timeout=10)
-    return response.json().get("operator", {}) if response.ok else {}
 
 
 @st.cache_data(ttl=5)
@@ -331,9 +314,7 @@ with upload_column:
             except requests.RequestException as error:
                 st.error(f"Ошибка загрузки: {error}")
 
-st.markdown('<div class="ga-section">Конвейер обработки</div>', unsafe_allow_html=True)
-operator_state = load_operator_state(report_id)
-operator_agents = operator_state.get("agents", {})
+st.markdown('<div class="ga-section">Обработка отчёта</div>', unsafe_allow_html=True)
 processing_state = load_processing_state(report_id)
 worker_stages = processing_state.get("worker", {}).get("stages", {})
 
@@ -353,35 +334,11 @@ def worker_stage_state(name: str) -> str | None:
     return None
 
 
-def agent_state(name: str, fallback: str) -> str:
-    record = operator_agents.get(name, {})
-    status = record.get("status")
-    if status == "completed":
-        result = record.get("result", {})
-        metrics = result.get("metrics", {})
-        if any(issue.get("severity") == "review" for issue in result.get("issues", [])):
-            return "ТРЕБУЕТ ПРОВЕРКИ"
-        if metrics.get("quality_status") == "review":
-            return "ТРЕБУЕТ ПРОВЕРКИ"
-        result_status = metrics.get("status")
-        return "ТРЕБУЕТ ПРОВЕРКИ" if result_status in {"partial", "review"} else "ГОТОВ"
-    if status == "blocked":
-        return "ОЖИДАЕТ ИНСТРУМЕНТ"
-    if status == "running":
-        return "В РАБОТЕ"
-    if status == "failed":
-        return "ТРЕБУЕТ ВНИМАНИЯ"
-    if status == "pending":
-        return "В ОЧЕРЕДИ"
-    return fallback
-
-
+map_state = bundle.get("maps", {}).get("status")
 agents = [
-    ("01", "Классификатор", "Разделяет тома, текст, карты, разрезы и таблицы.", worker_stage_state("page_routing") or agent_state("classifier", "ГОТОВ")),
-    ("02", "RAG-агент", "Извлекает структуры, скважины, горизонты и выводы с источниками.", worker_stage_state("agents") or agent_state("rag", "ГОТОВ")),
-    ("03", "Картограф", "Передаёт карты инструментам сегментации, векторизации и привязки.", agent_state("map", "ПОДКЛЮЧЕНИЕ OSS")),
-    ("04", "QC-агент", "Сверяет одинаковые сущности между текстом, картами и таблицами.", agent_state("qc", "ПРОТОТИП")),
-    ("05", "Экспорт", "Собирает проверенные данные в GeoPackage, GeoJSON и отчёт.", agent_state("export", worker_stage_state("bundle") or "СЛЕДУЮЩИЙ ЭТАП")),
+    ("01", "OCR → Markdown", "PaddleOCR читает текстовые страницы и сохраняет единый Markdown.", worker_stage_state("markdown") or "В ОЧЕРЕДИ"),
+    ("02", "Поиск по отчёту", "Markdown индексируется в RAGFlow и становится доступен для вопросов.", worker_stage_state("ragflow") or "В ОЧЕРЕДИ"),
+    ("03", "Карты", "Исходные карты выделяются отдельно; готовая векторизация показывается рядом.", "ГОТОВО" if map_state == "completed" else "НЕ ОЦИФРОВАНО"),
 ]
 agent_columns = st.columns(len(agents), gap="small")
 for column, (index, name, copy, state) in zip(agent_columns, agents):
@@ -397,7 +354,7 @@ for column, (index, name, copy, state) in zip(agent_columns, agents):
                 unsafe_allow_html=True,
             )
 
-overview_tab, materials_tab, search_tab = st.tabs(["Результаты", "Материалы", "Поиск по отчёту"])
+overview_tab, materials_tab, search_tab = st.tabs(["Результаты", "Карты", "Поиск по отчёту"])
 
 with overview_tab:
     metric_columns = st.columns(4)
@@ -431,63 +388,56 @@ with overview_tab:
         st.dataframe(pd.DataFrame(well_rows), hide_index=True, width="stretch")
 
 with materials_tab:
-    st.subheader("Материалы отчёта")
-    source_artifacts = [item for item in bundle["artifacts"] if item.get("type") == "source_scan"]
-    if source_artifacts:
-        preview = image_preview(source_artifacts[0]["path"])
-        if preview is not None:
-            st.image(preview, caption=source_artifacts[0]["label"], width="stretch")
-    map_artifacts = [item for item in bundle["artifacts"] if item.get("id", "").startswith("map-agent:")]
-    image_artifacts = [item for item in map_artifacts if item.get("type") == "image"]
-    for artifact in image_artifacts:
-        preview = image_preview(artifact["path"])
-        if preview is not None:
-            st.image(preview, caption=artifact["label"], width="stretch")
-    if map_artifacts:
-        map_qc = bundle.get("map_qc", {})
-        if map_qc:
-            qc_columns = st.columns(4)
-            qc_columns[0].metric("Изогипсы", map_qc.get("isoline_features", 0))
-            qc_columns[1].metric(
-                "Со значением",
-                f"{map_qc.get('valued_total', 0)} / {map_qc.get('isoline_features', 0)}",
-            )
-            qc_columns[2].metric("Пересечения", map_qc.get("crossing_isoline_pairs", 0))
-            qc_columns[3].metric("Конфликты", map_qc.get("crosscheck_disagreements", 0))
-        st.warning(
-            "Картографический слой экспериментальный: координаты пока пиксельные, "
-            "геопривязка и замкнутые структуры не подтверждены."
-        )
-        for artifact in map_artifacts:
+    maps = bundle.get("maps", {})
+    source_maps = [item for item in maps.get("sources", []) if item.get("exists")]
+    digitized_maps = [item for item in maps.get("digitized", []) if item.get("exists")]
+    source_column, digitized_column = st.columns(2, gap="large")
+    with source_column:
+        st.subheader("Исходные карты")
+        if not source_maps:
+            st.info("Карты в отчёте не обнаружены.")
+        for source in source_maps:
+            preview = image_preview(source["path"])
+            if preview is not None:
+                st.image(preview, caption=source["label"], width="stretch")
+    with digitized_column:
+        st.subheader("Оцифрованные карты")
+        image_maps = [item for item in digitized_maps if str(item.get("media_type", "")).startswith("image/")]
+        if not image_maps:
+            st.info("Оцифрованной версии пока нет.")
+        for artifact in image_maps:
+            preview = image_preview(artifact["path"])
+            if preview is not None:
+                st.image(preview, caption=artifact.get("label") or artifact.get("name"), width="stretch")
+        for artifact in digitized_maps:
             path = Path(str(artifact.get("path") or ""))
-            if artifact.get("type") == "vector" and path.exists():
+            if path.suffix.casefold() in {".geojson", ".json", ".gpkg"}:
                 st.download_button(
-                    artifact["label"],
+                    artifact.get("label") or path.name,
                     data=path.read_bytes(),
                     file_name=path.name,
-                    mime="application/geo+json" if path.suffix.casefold() == ".geojson" else "application/json",
-                    key=f"download-{artifact['id']}",
+                    mime=str(artifact.get("media_type") or "application/octet-stream"),
+                    key=f"map-download:{report_id}:{artifact.get('name')}",
                 )
-    else:
-        st.info("Для выбранного отчёта картографический агент ещё не сформировал проверяемый слой.")
 
 with search_tab:
     st.subheader("Вопрос к отчёту")
-    search_available = report_id == DEMO_REPORT_ID
+    search_available = worker_stages.get("ragflow", {}).get("status") == "completed"
     if not search_available:
-        st.info("Поиск станет доступен после завершения RAG-агента для этого фонда.")
+        st.info("Поиск станет доступен после индексации Markdown в RAGFlow.")
     preset_columns = st.columns(3)
     presets = [
         "Какие структуры выделены в отчёте?",
         "Какие скважины упоминаются и что в них установлено?",
         "Какие отражающие горизонты изучались?",
     ]
+    question_key = f"question:{report_id}"
     for column, preset in zip(preset_columns, presets):
-        if column.button(preset, use_container_width=True, disabled=not search_available):
-            st.session_state["question"] = preset
+        if column.button(preset, key=f"preset:{report_id}:{preset}", use_container_width=True, disabled=not search_available):
+            st.session_state[question_key] = preset
     question = st.text_input(
         "Вопрос",
-        key="question",
+        key=question_key,
         placeholder="Например: какие структуры рекомендуются для дальнейшего изучения?",
         label_visibility="collapsed",
     )
@@ -500,9 +450,12 @@ with search_tab:
             with st.spinner("Проверяем материалы отчёта..."):
                 answer = ask_report(report_id, question.strip())
             st.markdown(answer.get("answer") or answer.get("text") or "Ответ не найден.")
-            citations = answer.get("citations") or answer.get("sources") or []
+            citations = answer.get("evidence") or answer.get("citations") or answer.get("sources") or []
             if citations:
                 with st.expander("Источники"):
-                    st.json(citations)
-        except requests.RequestException:
-            st.error("Сервис поиска сейчас недоступен. Материалы выбранного отчёта остаются доступны локально.")
+                    for citation in citations:
+                        pages = ", ".join(citation.get("evidence", []))
+                        st.caption(f"{pages} · релевантность {citation.get('similarity', 0):.2f}")
+                        st.write(citation.get("excerpt", ""))
+        except requests.RequestException as error:
+            st.error(f"Поиск не выполнился: {error}")

@@ -89,3 +89,46 @@ def artifact_payload(report_id: str) -> list[dict[str, Any]]:
             }
         )
     return artifacts
+
+
+def map_payload(report_id: str) -> dict[str, Any]:
+    directory = report_run_dir(report_id)
+    manifest = read_json(directory / "job.json", {})
+    source_root = Path(str(manifest.get("source_root") or ""))
+    sources = []
+    for page in manifest.get("pages", []):
+        if page.get("content_type") != "map":
+            continue
+        path = source_root / str(page.get("relative_path") or "")
+        sources.append(
+            {
+                "page_id": page.get("id"),
+                "label": f"Исходная карта · {Path(str(page.get('relative_path') or '')).name}",
+                "path": str(path),
+                "media_type": f"image/{path.suffix.casefold().lstrip('.') or 'jpeg'}",
+                "exists": path.exists(),
+            }
+        )
+
+    result = read_json(directory / "map_agent" / "result.json", {})
+    digitized = []
+    for artifact in result.get("artifacts", []):
+        if artifact.get("name") == "source_map":
+            continue
+        path = Path(str(artifact.get("path") or ""))
+        digitized.append(
+            {
+                **artifact,
+                "exists": path.exists(),
+                "size_bytes": path.stat().st_size if path.exists() and path.is_file() else None,
+            }
+        )
+    return {
+        "report_id": report_id,
+        "sources": sources,
+        "digitized": digitized,
+        "status": result.get("status", "not_digitized"),
+        "quality_status": result.get("quality_status"),
+        "metrics": result.get("metrics", {}),
+        "issues": result.get("issues", []),
+    }

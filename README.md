@@ -45,9 +45,8 @@ secrets/               локальные ключи, не хранятся в G
 ## Поток данных
 
 ```text
-upload -> intake -> page routing -> PaddleOCR -> Markdown
-       -> RAGFlow -> extraction agents -> result bundle
-       -> map digitizer/QC when a map is available
+folder/upload -> page routing -> PaddleOCR -> Markdown -> RAGFlow -> search
+                           map pages -> map digitizer -> source/digitized pair
 ```
 
 FastAPI отвечает за загрузку, регистрацию, запуск и статус задач. Streamlit не
@@ -61,6 +60,7 @@ GPU-сервисом, а RAGFlow остаётся отдельным храни�
 - `GET /api/reports` — список отчётов и состояния.
 - `POST /api/reports/{report_id}/run` — запустить или повторить обработку.
 - `GET /api/reports/{report_id}/status` — стадии и ошибки.
+- `GET /api/reports/{report_id}/maps` — только исходные и оцифрованные карты.
 - `GET /api/reports/{report_id}` — итоговый bundle.
 - `POST /api/reports/{report_id}/ask` — вопрос по обработанному отчёту.
 

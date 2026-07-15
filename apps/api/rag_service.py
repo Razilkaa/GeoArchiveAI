@@ -15,7 +15,9 @@ import requests
 from openai import OpenAI
 
 
-SOURCE_PAGE_RE = re.compile(r"\[SOURCE_PAGE:\s*page_(\d{5})\.jpg\]")
+SOURCE_PAGE_RE = re.compile(
+    r"\[SOURCE_PAGE:\s*(?:page_(?P<legacy>\d{5})\.[^\]]+|page:(?P<current>\d{5})(?:;[^\]]*)?)\]"
+)
 CITATION_RE = re.compile(r"\[стр\.\s*([\d\s,;–—-]+)\]", re.IGNORECASE)
 TOKEN_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё-]{2,}")
 STOPWORDS = {
@@ -74,7 +76,11 @@ def clean_content(content: str, max_chars: int = 2200) -> str:
 
 
 def page_ids(content: str) -> list[str]:
-    return sorted({f"text:{int(page):05d}" for page in SOURCE_PAGE_RE.findall(content)})
+    pages = {
+        int(match.group("legacy") or match.group("current"))
+        for match in SOURCE_PAGE_RE.finditer(content)
+    }
+    return [f"text:{page:05d}" for page in sorted(pages)]
 
 
 def cited_page_numbers(answer: str) -> set[int]:
@@ -123,12 +129,14 @@ class RagflowClient:
         self,
         token: str,
         dataset_id: str,
+        document_ids: list[str] | None = None,
         base_url: str = "https://ragflow-dev.finam.ru/api/v1",
         proxy_url: str | None = "socks5h://127.0.0.1:7777",
         session: requests.Session | None = None,
     ) -> None:
         self.token = token
         self.dataset_id = dataset_id
+        self.document_ids = document_ids or []
         self.base_url = base_url.rstrip("/")
         self.proxy_url = proxy_url
         self.session = session or requests.Session()
@@ -144,6 +152,7 @@ class RagflowClient:
             "headers": {"Authorization": f"Bearer {self.token}"},
             "json": {
                 "dataset_ids": [self.dataset_id],
+                "document_ids": self.document_ids,
                 "question": question,
                 "page": 1,
                 "page_size": limit,
@@ -153,7 +162,7 @@ class RagflowClient:
                 "keyword": True,
             },
             "verify": False,
-            "timeout": 45,
+            "timeout": float(os.environ.get("RAGFLOW_RETRIEVAL_TIMEOUT_S", "8")),
         }
         transport = "proxy" if proxies else "direct"
         try:
@@ -197,12 +206,13 @@ class LocalCorpusRetriever:
     def __init__(self, corpus_path: Path) -> None:
         pages: dict[int, list[str]] = defaultdict(list)
         for line in corpus_path.read_text(encoding="utf-8").replace("\r", "").splitlines():
-            matches = SOURCE_PAGE_RE.findall(line)
-            if not matches:
+            match = SOURCE_PAGE_RE.search(line)
+            if match is None:
                 continue
             cleaned = SOURCE_PAGE_RE.sub("", line).strip()
             if cleaned:
-                pages[int(matches[0])].append(cleaned)
+                page = int(match.group("legacy") or match.group("current"))
+                pages[page].append(cleaned)
         self.documents = [
             {
                 "page": page,
@@ -283,13 +293,20 @@ class ReportAnswerService:
         self.config = config
         self.bundle = json.loads(config.bundle_path.read_text(encoding="utf-8"))
         metadata = json.loads(config.ragflow_metadata_path.read_text(encoding="utf-8"))
-        dataset_id = metadata["document_state"]["dataset_id"]
+        document_state = metadata.get("document_state", {})
+        dataset_id = metadata.get("dataset_id") or document_state.get("dataset_id")
+        if not dataset_id:
+            raise ValueError(f"RAGFlow dataset is missing in {config.ragflow_metadata_path}")
+        document_ids = list(metadata.get("document_ids") or [])
+        if not document_ids and metadata.get("document_id"):
+            document_ids = [str(metadata["document_id"])]
         proxy = os.environ.get("RAGFLOW_PROXY", "socks5h://127.0.0.1:7777")
         if proxy.lower() in {"", "none", "off"}:
             proxy = None
         self.ragflow = ragflow or RagflowClient(
             token=read_token(config.ragflow_token_path),
             dataset_id=dataset_id,
+            document_ids=document_ids,
             proxy_url=proxy,
         )
         self.local_retriever = LocalCorpusRetriever(config.local_corpus_path)
@@ -304,7 +321,7 @@ class ReportAnswerService:
 
     def saved_answer(self, question: str) -> dict[str, Any] | None:
         normalized = question.strip().casefold()
-        for item in self.bundle["preset_queries"]:
+        for item in self.bundle.get("preset_queries", []):
             if item["question"].strip().casefold() == normalized:
                 return {**item, "source": "saved", "citation_qc": {"status": "pass", "invalid": []}}
         return None
@@ -336,7 +353,7 @@ class ReportAnswerService:
         try:
             retrieved = self.ragflow.retrieve(question)
         except requests.RequestException:
-            allow_local = os.environ.get("ALLOW_LOCAL_RETRIEVAL_FALLBACK", "false").casefold()
+            allow_local = os.environ.get("ALLOW_LOCAL_RETRIEVAL_FALLBACK", "true").casefold()
             if allow_local not in {"1", "true", "yes", "on"}:
                 raise
             retrieved = self.local_retriever.retrieve(question)

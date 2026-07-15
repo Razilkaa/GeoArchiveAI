@@ -64,6 +64,24 @@ class ApiTest(unittest.TestCase):
         report = next(item for item in reports if item["report_id"] == "375392")
         self.assertEqual(report["worker_status"], "running")
 
+    def test_maps_endpoint_returns_only_detected_maps(self):
+        directory = self.runs / "375392"
+        source = directory / "map.jpg"
+        source.write_bytes(b"image")
+        manifest = json.loads((directory / "job.json").read_text(encoding="utf-8"))
+        manifest["pages"] = [
+            {"id": "page:00001", "relative_path": "map.jpg", "content_type": "map"},
+            {"id": "page:00002", "relative_path": "text.jpg", "content_type": "text"},
+        ]
+        (directory / "job.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+        response = self.client.get("/api/reports/375392/maps")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["sources"]), 1)
+        self.assertEqual(response.json()["sources"][0]["page_id"], "page:00001")
+        self.assertEqual(response.json()["status"], "not_digitized")
+
     @patch("app.routers.reports.reconcile_now")
     def test_scan_registers_and_starts_reports(self, reconcile):
         reconcile.return_value = {

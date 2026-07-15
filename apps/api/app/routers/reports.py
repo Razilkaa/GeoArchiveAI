@@ -1,28 +1,51 @@
 from __future__ import annotations
 
-from functools import lru_cache
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
 from app.schemas import AskRequest, IntakeResponse, RunRequest
+from app.config import settings
 from app.services.automation import reconcile_now
 from app.services.intake import save_upload
 from app.services.jobs import start_report
-from app.services.reports import artifact_payload, list_reports, read_json, report_run_dir, status_payload
-from rag_service import ReportAnswerService, load_report_configs
+from app.services.reports import artifact_payload, list_reports, map_payload, read_json, report_run_dir, status_payload
+from rag_service import ReportAnswerService, ReportConfig, load_report_configs
 
 
 router = APIRouter(prefix="/api", tags=["reports"])
 configs = load_report_configs()
 
 
-@lru_cache(maxsize=4)
+def report_config(report_id: str) -> ReportConfig:
+    directory = report_run_dir(report_id)
+    dynamic = ReportConfig(
+        report_id=report_id,
+        bundle_path=directory / "result_bundle.json",
+        ragflow_metadata_path=directory / "ragflow.json",
+        local_corpus_path=directory / f"report_{report_id}_fast_ocr.md",
+        ragflow_token_path=settings.project_root / "secrets" / "ragflow_token.txt",
+        llm_credentials_path=settings.project_root / "secrets" / "tokent.txt",
+    )
+    if all(
+        path.exists()
+        for path in (
+            dynamic.bundle_path,
+            dynamic.ragflow_metadata_path,
+            dynamic.local_corpus_path,
+            dynamic.ragflow_token_path,
+            dynamic.llm_credentials_path,
+        )
+    ):
+        return dynamic
+    if report_id in configs:
+        return configs[report_id]
+    raise KeyError(report_id)
+
+
 def answer_service(report_id: str) -> ReportAnswerService:
-    if report_id not in configs:
-        raise KeyError(report_id)
-    return ReportAnswerService(configs[report_id])
+    return ReportAnswerService(report_config(report_id))
 
 
 @router.get("/reports")
@@ -69,6 +92,11 @@ def report_status(report_id: str) -> dict[str, Any]:
 @router.get("/reports/{report_id}/artifacts")
 def report_artifacts(report_id: str) -> dict[str, Any]:
     return {"report_id": report_id, "artifacts": artifact_payload(report_id)}
+
+
+@router.get("/reports/{report_id}/maps")
+def report_maps(report_id: str) -> dict[str, Any]:
+    return map_payload(report_id)
 
 
 @router.post("/reports/{report_id}/run", status_code=202)
