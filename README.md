@@ -63,6 +63,7 @@ GPU-сервисом, а RAGFlow остаётся отдельным храни�
 - `GET /api/reports/{report_id}/maps` — только исходные и оцифрованные карты.
 - `GET /api/reports/{report_id}` — итоговый bundle.
 - `POST /api/reports/{report_id}/ask` — вопрос по обработанному отчёту.
+- `POST /api/search` — поиск и единый ответ по всему фонду отчётов.
 
 Полные схемы запросов и ответов всегда доступны в Swagger.
 

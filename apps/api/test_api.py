@@ -10,6 +10,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.routers import reports as report_router
 from app.services import reports as report_service
 
 
@@ -53,6 +54,22 @@ class ApiTest(unittest.TestCase):
         self.assertIn("/api/reports/upload", paths)
         self.assertIn("/api/reports/{report_id}/run", paths)
         self.assertIn("/api/queue", paths)
+        self.assertIn("/api/search", paths)
+
+    @patch.object(report_router, "corpus_answer_service")
+    def test_corpus_search_endpoint(self, service_factory):
+        service_factory.return_value.ask.return_value = {
+            "question": "Где были притоки?",
+            "answer": "В отчёте 375392 [источник 1].",
+            "evidence": [{"report_id": "375392"}],
+        }
+
+        response = self.client.post(
+            "/api/search", json={"question": "Где были притоки?", "mode": "live"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["evidence"][0]["report_id"], "375392")
 
     def test_worker_lock_is_reported_as_running(self):
         lock = self.runs / "375392" / "worker" / "worker.lock"

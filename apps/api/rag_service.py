@@ -7,6 +7,7 @@ import os
 import re
 import time
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,8 @@ SOURCE_PAGE_RE = re.compile(
     r"\[SOURCE_PAGE:\s*(?:page_(?P<legacy>\d{5})\.[^\]]+|page:(?P<current>\d{5})(?:;[^\]]*)?)\]"
 )
 CITATION_RE = re.compile(r"\[стр\.\s*([\d\s,;–—-]+)\]", re.IGNORECASE)
+SOURCE_CITATION_RE = re.compile(r"\[источник\s+(\d+)\]", re.IGNORECASE)
+REPORT_DOCUMENT_RE = re.compile(r"^report_(.+?)_fast_ocr(?:_part_\d+)?(?:_[0-9a-f]+)?\.md$", re.IGNORECASE)
 TOKEN_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё-]{2,}")
 STOPWORDS = {
     "как", "для", "или", "при", "что", "это", "были", "была", "было", "быть",
@@ -45,6 +48,12 @@ SYSTEM_PROMPT = """Ты evidence-ассистент по архивному ге
 неоднозначные имена без пояснения. Проверенные структурированные факты имеют
 приоритет над сырым OCR-текстом, особенно для идентификаторов скважин и названий.
 Ответ должен быть кратким и на русском языке."""
+
+CORPUS_SYSTEM_PROMPT = """Ты evidence-ассистент по фонду архивных геологических отчётов.
+Отвечай только по предоставленным источникам и не дополняй ответ общими знаниями.
+Для каждого факта указывай идентификатор отчёта и ссылку вида [источник 1].
+Если OCR-фрагмент неоднозначен, прямо отмечай это. Объединяй дубли из частей одного
+отчёта. Ответ должен быть кратким, предметным и на русском языке."""
 
 
 def read_key_values(path: Path) -> dict[str, str]:
@@ -83,6 +92,11 @@ def page_ids(content: str) -> list[str]:
     return [f"text:{page:05d}" for page in sorted(pages)]
 
 
+def report_id_from_document(document_name: str | None) -> str | None:
+    match = REPORT_DOCUMENT_RE.match(document_name or "")
+    return match.group(1) if match else None
+
+
 def cited_page_numbers(answer: str) -> set[int]:
     pages: set[int] = set()
     for citation in CITATION_RE.findall(answer):
@@ -91,7 +105,7 @@ def cited_page_numbers(answer: str) -> set[int]:
 
 
 def retrieval_source(transport: str | None, suffix: str = "") -> str:
-    base = "ragflow" if transport in {"ragflow", "proxy", "direct"} else "local_bm25"
+    base = "ragflow" if transport in {"ragflow", "proxy", "direct", "ragflow_fanout"} else "local_bm25"
     return f"{base}_{suffix}" if suffix else base
 
 
@@ -148,19 +162,21 @@ class RagflowClient:
         proxies = None
         if self.proxy_url:
             proxies = {"http": self.proxy_url, "https": self.proxy_url}
+        request_payload = {
+            "dataset_ids": [self.dataset_id],
+            "question": question,
+            "page": 1,
+            "page_size": limit,
+            "similarity_threshold": 0.1,
+            "vector_similarity_weight": 0.3,
+            "top_k": 64,
+            "keyword": True,
+        }
+        if self.document_ids:
+            request_payload["document_ids"] = self.document_ids
         request_kwargs = {
             "headers": {"Authorization": f"Bearer {self.token}"},
-            "json": {
-                "dataset_ids": [self.dataset_id],
-                "document_ids": self.document_ids,
-                "question": question,
-                "page": 1,
-                "page_size": limit,
-                "similarity_threshold": 0.1,
-                "vector_similarity_weight": 0.3,
-                "top_k": 64,
-                "keyword": True,
-            },
+            "json": request_payload,
             "verify": False,
             "timeout": float(os.environ.get("RAGFLOW_RETRIEVAL_TIMEOUT_S", "8")),
         }
@@ -199,6 +215,50 @@ class RagflowClient:
             "total": (payload.get("data") or {}).get("total"),
             "latency_ms": round((time.perf_counter() - started) * 1000),
             "transport": transport,
+        }
+
+
+class CorpusRagflowRetriever:
+    def __init__(self, clients: list[RagflowClient], workers: int = 8) -> None:
+        self.clients = clients
+        self.workers = max(1, workers)
+
+    def retrieve(self, question: str, limit: int = 12) -> dict[str, Any]:
+        started = time.perf_counter()
+        results = []
+        errors = []
+        with ThreadPoolExecutor(max_workers=min(self.workers, len(self.clients))) as pool:
+            futures = {
+                pool.submit(client.retrieve, question, min(5, limit)): client
+                for client in self.clients
+            }
+            for future in as_completed(futures):
+                try:
+                    results.append(future.result())
+                except Exception as error:
+                    errors.append(type(error).__name__)
+        if not results and errors:
+            raise RuntimeError(f"RAGFlow corpus retrieval failed: {sorted(set(errors))}")
+
+        unique = {}
+        for result in results:
+            for chunk in result.get("chunks", []):
+                key = (chunk.get("document_name"), chunk.get("excerpt"))
+                current = unique.get(key)
+                if current is None or chunk.get("similarity", 0) > current.get("similarity", 0):
+                    unique[key] = chunk
+        chunks = sorted(
+            unique.values(),
+            key=lambda item: (-float(item.get("similarity") or 0), str(item.get("document_name") or "")),
+        )[:limit]
+        for rank, chunk in enumerate(chunks, start=1):
+            chunk["rank"] = rank
+        return {
+            "chunks": chunks,
+            "total": len(unique),
+            "latency_ms": round((time.perf_counter() - started) * 1000),
+            "transport": "ragflow_fanout",
+            "partial_errors": errors,
         }
 
 
@@ -264,6 +324,78 @@ class LocalCorpusRetriever:
             }
             for rank, (score, document) in enumerate(top, start=1)
         ]
+        return {
+            "chunks": chunks,
+            "total": len(scored),
+            "latency_ms": round((time.perf_counter() - started) * 1000),
+            "transport": "local_bm25",
+        }
+
+
+class CorpusLocalRetriever:
+    def __init__(self, configs: list[ReportConfig]) -> None:
+        self.documents = []
+        for config in configs:
+            pages: dict[int, list[str]] = defaultdict(list)
+            for line in config.local_corpus_path.read_text(encoding="utf-8").replace("\r", "").splitlines():
+                match = SOURCE_PAGE_RE.search(line)
+                if match is None:
+                    continue
+                cleaned = SOURCE_PAGE_RE.sub("", line).strip()
+                if cleaned:
+                    page = int(match.group("legacy") or match.group("current"))
+                    pages[page].append(cleaned)
+            for page, lines in sorted(pages.items()):
+                text = "\n".join(lines)
+                self.documents.append({
+                    "report_id": config.report_id,
+                    "page": page,
+                    "text": text,
+                    "terms": Counter(tokens(text)),
+                })
+        doc_frequency: Counter[str] = Counter()
+        for document in self.documents:
+            doc_frequency.update(document["terms"].keys())
+        count = max(1, len(self.documents))
+        self.idf = {
+            term: math.log(1 + (count - frequency + 0.5) / (frequency + 0.5))
+            for term, frequency in doc_frequency.items()
+        }
+        self.average_length = (
+            sum(sum(document["terms"].values()) for document in self.documents) / count
+        )
+
+    def retrieve(self, question: str, limit: int = 12) -> dict[str, Any]:
+        started = time.perf_counter()
+        query_terms = Counter(tokens(question))
+        scored = []
+        for document in self.documents:
+            length = sum(document["terms"].values())
+            score = 0.0
+            for term, query_weight in query_terms.items():
+                frequency = document["terms"].get(term, 0)
+                if not frequency:
+                    continue
+                denominator = frequency + 1.5 * (
+                    0.25 + 0.75 * length / max(1.0, self.average_length)
+                )
+                score += self.idf.get(term, 0.0) * frequency * 2.5 / denominator * query_weight
+            if score > 0:
+                scored.append((score, document))
+        scored.sort(key=lambda item: (-item[0], item[1]["report_id"], item[1]["page"]))
+        top = scored[:limit]
+        max_score = top[0][0] if top else 1.0
+        chunks = []
+        for rank, (score, document) in enumerate(top, start=1):
+            chunks.append({
+                "rank": rank,
+                "similarity": round(score / max_score, 4),
+                "document_name": f"report_{document['report_id']}_fast_ocr.md",
+                "report_id": document["report_id"],
+                "evidence": [f"text:{document['page']:05d}"],
+                "excerpt": clean_content(document["text"]),
+                "raw_content": document["text"],
+            })
         return {
             "chunks": chunks,
             "total": len(scored),
@@ -472,6 +604,138 @@ class ReportAnswerService:
         }
         self.answer_cache[cache_key] = copy.deepcopy(result)
         return result
+
+
+class CorpusAnswerService:
+    def __init__(
+        self,
+        config: ReportConfig | list[ReportConfig],
+        ragflow: RagflowClient | CorpusRagflowRetriever | None = None,
+        llm: OpenAI | None = None,
+    ) -> None:
+        configs = config if isinstance(config, list) else [config]
+        primary = configs[0]
+        proxy = os.environ.get("RAGFLOW_PROXY", "socks5h://127.0.0.1:7777")
+        if proxy.lower() in {"", "none", "off"}:
+            proxy = None
+        local_retriever = CorpusLocalRetriever(configs)
+        if ragflow is not None:
+            self.ragflow = ragflow
+        elif os.environ.get("CORPUS_RETRIEVAL", "local").casefold() == "ragflow":
+            clients = []
+            for item in configs:
+                metadata = json.loads(item.ragflow_metadata_path.read_text(encoding="utf-8"))
+                document_state = metadata.get("document_state", {})
+                dataset_id = metadata.get("dataset_id") or document_state.get("dataset_id")
+                document_ids = list(metadata.get("document_ids") or [])
+                if not document_ids:
+                    document_ids = [
+                        str(document["document_id"])
+                        for document in metadata.get("documents", [])
+                        if document.get("document_id")
+                    ]
+                if dataset_id and document_ids:
+                    clients.append(RagflowClient(
+                        token=read_token(item.ragflow_token_path),
+                        dataset_id=dataset_id,
+                        document_ids=document_ids,
+                        proxy_url=proxy,
+                    ))
+            if not clients:
+                raise ValueError("RAGFlow corpus has no indexed documents")
+            self.ragflow = CorpusRagflowRetriever(clients)
+        else:
+            self.ragflow = local_retriever
+        credentials = read_key_values(primary.llm_credentials_path)
+        self.model = os.environ.get("DEMO_LLM_MODEL", "openai/gpt-4o-mini")
+        self.llm = llm or OpenAI(
+            api_key=credentials["OPENAI_API_KEY"],
+            base_url=credentials.get("BASE_URL"),
+            timeout=60,
+        )
+
+    def ask(self, question: str, allow_llm: bool = True) -> dict[str, Any]:
+        question = question.strip()
+        if len(question) < 5:
+            raise ValueError("Question is too short")
+        if len(question) > 1000:
+            raise ValueError("Question is too long")
+
+        retrieved = self.ragflow.retrieve(question, limit=12)
+        chunks = []
+        for chunk in retrieved["chunks"]:
+            chunks.append({**chunk, "report_id": report_id_from_document(chunk.get("document_name"))})
+        evidence = [{key: value for key, value in chunk.items() if key != "raw_content"} for chunk in chunks]
+        if not chunks:
+            return {
+                "question": question,
+                "answer": "Во всём индексированном фонде не найдено достаточно данных для ответа.",
+                "evidence": [],
+                "source": retrieval_source(retrieved.get("transport")),
+                "model": None,
+                "retrieval_latency_ms": retrieved["latency_ms"],
+                "retrieval_transport": retrieved.get("transport"),
+                "citation_qc": {"status": "pass", "invalid": []},
+            }
+        if not allow_llm:
+            return {
+                "question": question,
+                "answer": "Найдены релевантные фрагменты по всему фонду; генерация ответа отключена.",
+                "evidence": evidence,
+                "source": retrieval_source(retrieved.get("transport"), "retrieval"),
+                "model": None,
+                "retrieval_latency_ms": retrieved["latency_ms"],
+                "retrieval_transport": retrieved.get("transport"),
+                "citation_qc": {"status": "pass", "invalid": []},
+            }
+
+        context = []
+        for chunk in chunks:
+            pages = ", ".join(page.split(":")[1] for page in chunk["evidence"]) or "не определены"
+            report_id = chunk.get("report_id") or "не определён"
+            context.append(
+                f"ИСТОЧНИК {chunk['rank']} (отчёт {report_id}, страницы {pages}, "
+                f"документ {chunk.get('document_name')}):\n{chunk['excerpt']}"
+            )
+        started = time.perf_counter()
+        generation_error = None
+        try:
+            response = self.llm.chat.completions.create(
+                model=self.model,
+                temperature=0,
+                messages=[
+                    {"role": "system", "content": CORPUS_SYSTEM_PROMPT},
+                    {"role": "user", "content": f"ВОПРОС:\n{question}\n\n" + "\n\n".join(context)},
+                ],
+            )
+            answer = (response.choices[0].message.content or "").strip()
+        except Exception as error:
+            generation_error = type(error).__name__
+            answer = "\n\n".join(
+                f"Отчёт {chunk.get('report_id') or 'не определён'}: {chunk['excerpt'][:500]} "
+                f"[источник {chunk['rank']}]"
+                for chunk in chunks[:3]
+            )
+        cited = {int(value) for value in SOURCE_CITATION_RE.findall(answer)}
+        valid = set(range(1, len(chunks) + 1))
+        invalid = sorted(cited - valid)
+        return {
+            "question": question,
+            "answer": answer,
+            "evidence": evidence,
+            "source": retrieval_source(retrieved.get("transport"), "llm") if generation_error is None else "extractive_fallback",
+            "model": self.model if generation_error is None else None,
+            "generation_error": generation_error,
+            "retrieval_latency_ms": retrieved["latency_ms"],
+            "retrieval_transport": retrieved.get("transport"),
+            "generation_latency_ms": round((time.perf_counter() - started) * 1000),
+            "citation_qc": {
+                "status": "pass" if cited and not invalid else "review",
+                "cited_sources": sorted(cited),
+                "invalid": invalid,
+                "missing_citations": not cited,
+            },
+        }
 
 
 def load_report_configs(path: Path | None = None) -> dict[str, ReportConfig]:

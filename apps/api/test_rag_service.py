@@ -7,6 +7,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from rag_service import (
+    CorpusAnswerService,
+    CorpusLocalRetriever,
+    CorpusRagflowRetriever,
     LocalCorpusRetriever,
     RagflowClient,
     ReportAnswerService,
@@ -14,6 +17,7 @@ from rag_service import (
     cited_page_numbers,
     page_ids,
     retrieval_source,
+    report_id_from_document,
 )
 
 
@@ -116,6 +120,60 @@ class RagServiceTest(unittest.TestCase):
         self.assertEqual(session.request_json["dataset_ids"], ["dataset"])
         self.assertEqual(session.request_json["document_ids"], ["doc-1", "doc-2"])
 
+    def test_dataset_retrieval_omits_empty_document_filter(self):
+        session = FakeSession()
+        client = RagflowClient(
+            token="token", dataset_id="dataset", document_ids=[], proxy_url=None, session=session
+        )
+
+        client.retrieve("question")
+
+        self.assertNotIn("document_ids", session.request_json)
+
+    def test_report_id_is_read_from_ragflow_document_name(self):
+        name = "report_377069_fast_ocr_part_002_0fe803101a03.md"
+        self.assertEqual(report_id_from_document(name), "377069")
+
+    def test_corpus_retriever_merges_and_reranks_reports(self):
+        first = FakeRagflow()
+        second = FakeRagflow()
+        second.retrieve = lambda question, limit=5: {
+            **FakeRagflow().retrieve(question, limit),
+            "chunks": [{
+                **FakeRagflow().retrieve(question, limit)["chunks"][0],
+                "similarity": 0.9,
+                "document_name": "report_377069_fast_ocr_part_001_deadbeef.md",
+            }],
+        }
+
+        result = CorpusRagflowRetriever([first, second], workers=2).retrieve("приток", limit=2)
+
+        self.assertEqual(len(result["chunks"]), 2)
+        self.assertEqual(result["chunks"][0]["document_name"], "report_377069_fast_ocr_part_001_deadbeef.md")
+        self.assertEqual(result["transport"], "ragflow_fanout")
+
+    def test_local_corpus_search_preserves_report_identity(self):
+        second_root = Path(self.temp.name) / "second"
+        second_root.mkdir()
+        second_corpus = second_root / "corpus.md"
+        second_corpus.write_text(
+            "[SOURCE_PAGE: page:00031; path=scan.tif] Получен приток нефти из скважины 12.",
+            encoding="utf-8",
+        )
+        second = ReportConfig(
+            report_id="377069",
+            bundle_path=self.config.bundle_path,
+            ragflow_metadata_path=self.config.ragflow_metadata_path,
+            local_corpus_path=second_corpus,
+            ragflow_token_path=self.config.ragflow_token_path,
+            llm_credentials_path=self.config.llm_credentials_path,
+        )
+
+        result = CorpusLocalRetriever([self.config, second]).retrieve("приток нефти", limit=5)
+
+        self.assertEqual(result["chunks"][0]["report_id"], "377069")
+        self.assertEqual(result["chunks"][0]["evidence"], ["text:00031"])
+
     def test_grouped_citations_are_parsed(self):
         self.assertEqual(cited_page_numbers("Ответ [стр. 3, 154; 115]."), {3, 115, 154})
 
@@ -185,6 +243,25 @@ class RagServiceTest(unittest.TestCase):
         )
         result = service.ask("Какие горизонты изучались?")
         self.assertTrue(result["citation_qc"]["missing_citations"])
+
+    def test_corpus_answer_exposes_report_id_and_source_citation(self):
+        service = CorpusAnswerService(
+            self.config,
+            ragflow=FakeRagflow(),
+            llm=FakeLlm("В отчёте 377069 отмечены газопроявления [источник 1]."),
+        )
+        service.ragflow.retrieve = lambda question, limit=12: {
+            **FakeRagflow().retrieve(question, limit),
+            "chunks": [{
+                **FakeRagflow().retrieve(question, limit)["chunks"][0],
+                "document_name": "report_377069_fast_ocr_part_001_deadbeef.md",
+            }],
+        }
+
+        result = service.ask("Где были приточные скважины?")
+
+        self.assertEqual(result["evidence"][0]["report_id"], "377069")
+        self.assertEqual(result["citation_qc"]["status"], "pass")
 
 
 if __name__ == "__main__":
