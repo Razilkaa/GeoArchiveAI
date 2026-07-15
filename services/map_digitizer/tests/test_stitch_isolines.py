@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from stitch_isolines import propagate_values_by_tangent, read_isoline_labels
+from services.map_digitizer.stitch_isolines import propagate_values_by_tangent, read_isoline_labels
 
 
 class StitchIsolinesTest(unittest.TestCase):

@@ -73,16 +73,16 @@ def run_report(report_id: str, request: RunRequest) -> dict[str, Any]:
 
 @router.get("/reports/{report_id}")
 def report_bundle(report_id: str) -> dict[str, Any]:
+    directory = report_run_dir(report_id)
+    result = read_json(directory / "result_bundle.json") or read_json(
+        directory / "orchestrator" / "report_result.json"
+    )
+    if result is not None:
+        return result
     try:
         return answer_service(report_id).bundle
     except KeyError:
-        directory = report_run_dir(report_id)
-        result = read_json(directory / "result_bundle.json") or read_json(
-            directory / "orchestrator" / "report_result.json"
-        )
-        if result is None:
-            raise HTTPException(409, "report_not_ready")
-        return result
+        raise HTTPException(409, "report_not_ready")
 
 
 @router.post("/reports/{report_id}/ask")

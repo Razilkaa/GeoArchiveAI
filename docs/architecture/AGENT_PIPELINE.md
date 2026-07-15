@@ -10,4 +10,4 @@
 
 LLM управляет задачей и разбирает неоднозначности. Детерминированные инструменты отвечают за OCR, геометрию, координаты и форматы данных.
 
-Текущая реализация оператора находится в `pipeline/report_orchestrator.py`. Формат результата картографического адаптера зафиксирован в `pipeline/contracts/map_agent_result.example.json`.
+Текущая реализация оператора находится в `pipeline/report_orchestrator.py`. Формат результата картографического адаптера зафиксирован в `services/map_digitizer/contracts/map_agent_result.example.json`.

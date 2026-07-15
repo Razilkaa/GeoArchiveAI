@@ -17,7 +17,10 @@ import matplotlib.pyplot as plt
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
 
-from trace_map_isolines import imread_gray, imwrite, skeletonize, vectorize_skeleton
+try:
+    from .trace_map_isolines import imread_gray, imwrite, skeletonize, vectorize_skeleton
+except ImportError:
+    from trace_map_isolines import imread_gray, imwrite, skeletonize, vectorize_skeleton
 
 
 NEIGHBOURS = tuple((dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if dx or dy)

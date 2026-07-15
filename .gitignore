@@ -18,4 +18,5 @@ pipeline/output/
 pipeline/output_v4/
 pipeline/spotter_test/
 pipeline/tracing/out/
-deploy/paddle_ocr/models/
+services/ocr/models/
+research/map_digitization/artifacts/

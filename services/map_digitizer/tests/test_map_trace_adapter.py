@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from map_trace_adapter import build_map_result
+from services.map_digitizer.map_trace_adapter import build_map_result
 
 
 class MapTraceAdapterTest(unittest.TestCase):
