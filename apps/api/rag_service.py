@@ -160,7 +160,7 @@ class RagflowClient:
                 "keyword": True,
             },
             "verify": False,
-            "timeout": float(os.environ.get("RAGFLOW_RETRIEVAL_TIMEOUT_S", "8")),
+            "timeout": float(os.environ.get("RAGFLOW_RETRIEVAL_TIMEOUT_S", "60")),
         }
         transport = "proxy" if proxies else "direct"
         try:
