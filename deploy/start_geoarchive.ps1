@@ -17,9 +17,9 @@ if (-not (Has-ProcessCommand "18080:127\.0\.0\.1:18080")) {
     Start-Sleep -Seconds 2
 }
 
-if (-not (Has-ProcessCommand "uvicorn api:app.*8765")) {
+if (-not (Has-ProcessCommand "uvicorn (api|app\.main):app.*8765")) {
     Start-Process python -ArgumentList @(
-        "-m", "uvicorn", "api:app", "--host", "127.0.0.1", "--port", "8765"
+        "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8765"
     ) -WorkingDirectory "$project\demo_app\backend" -WindowStyle Hidden
 }
 

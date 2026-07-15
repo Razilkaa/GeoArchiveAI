@@ -7,11 +7,20 @@ from pathlib import Path
 
 import fitz
 
-from factory_runner import build_provenance_markdown, prepare_ocr_queue
+from factory_runner import build_provenance_markdown, prepare_ocr_queue, split_markdown_documents
 from report_factory import build_manifest, write_manifest
 
 
 class FactoryRunnerTest(unittest.TestCase):
+    def test_ragflow_documents_respect_embedding_window_guard(self):
+        with tempfile.TemporaryDirectory() as temp:
+            markdown = Path(temp) / "report.md"
+            markdown.write_text("\n".join("x" * 900 for _ in range(60)), encoding="utf-8")
+            documents = split_markdown_documents(markdown, max_chars=10_000)
+
+            self.assertGreater(len(documents), 1)
+            self.assertLessEqual(max(path.stat().st_size for path in documents), 11_000)
+
     def test_queue_names_are_unique_and_markdown_keeps_provenance(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

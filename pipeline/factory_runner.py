@@ -432,6 +432,32 @@ def build_provenance_markdown(manifest_path: Path) -> Path:
     return markdown
 
 
+def split_markdown_documents(markdown: Path, max_chars: int = 20_000) -> list[Path]:
+    output_dir = markdown.parent / "ragflow_documents"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for stale in output_dir.glob(f"{markdown.stem}_part_*.md"):
+        stale.unlink()
+    lines = markdown.read_text(encoding="utf-8").splitlines()
+    documents: list[Path] = []
+    current: list[str] = []
+    current_chars = 0
+    for line in lines:
+        line_chars = len(line) + 1
+        if current and current_chars + line_chars > max_chars:
+            path = output_dir / f"{markdown.stem}_part_{len(documents) + 1:03d}.md"
+            path.write_text("\n".join(current) + "\n", encoding="utf-8")
+            documents.append(path)
+            current = []
+            current_chars = 0
+        current.append(line)
+        current_chars += line_chars
+    if current:
+        path = output_dir / f"{markdown.stem}_part_{len(documents) + 1:03d}.md"
+        path.write_text("\n".join(current) + "\n", encoding="utf-8")
+        documents.append(path)
+    return documents
+
+
 class RagflowIngestor:
     def __init__(self, base_url: str, token: str, proxy: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
@@ -495,12 +521,19 @@ class RagflowIngestor:
             raise TimeoutError(f"RAGFlow did not parse {remote_name} within {timeout_s}s")
         return {"uploaded": uploaded, "remote_name": remote_name, "document_id": document_id, "state": state}
 
-    def retrieve(self, dataset_id: str, document_id: str, question: str, limit: int = 8) -> list[dict[str, Any]]:
+    def retrieve(
+        self,
+        dataset_id: str,
+        document_id: str | list[str],
+        question: str,
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        document_ids = document_id if isinstance(document_id, list) else [document_id]
         response = self.session.post(
             f"{self.base_url}/retrieval",
             json={
                 "dataset_ids": [dataset_id],
-                "document_ids": [document_id],
+                "document_ids": document_ids,
                 "question": question,
                 "page": 1,
                 "page_size": limit,
@@ -530,7 +563,20 @@ def ingest_ragflow(
     set_stage(manifest_path, "ragflow_ingest", "running")
     started = time.perf_counter()
     try:
-        result = RagflowIngestor(base_url, read_token(token_file), proxy).ingest(markdown, dataset_id)
+        ingestor = RagflowIngestor(base_url, read_token(token_file), proxy)
+        documents = split_markdown_documents(markdown)
+        ingested = [ingestor.ingest(document, dataset_id) for document in documents]
+        document_ids = [item["document_id"] for item in ingested]
+        result = {
+            "uploaded": any(item["uploaded"] for item in ingested),
+            "documents": ingested,
+            "document_ids": document_ids,
+            "document_id": document_ids[0],
+            "state": {
+                "run": "DONE",
+                "chunk_count": sum(int((item.get("state") or {}).get("chunk_count") or 0) for item in ingested),
+            },
+        }
     except Exception as error:
         set_stage(manifest_path, "ragflow_ingest", "failed", error=type(error).__name__)
         raise
@@ -544,6 +590,7 @@ def ingest_ragflow(
         "completed",
         elapsed_s=result["elapsed_s"],
         document_id=result["document_id"],
+        document_count=len(result["document_ids"]),
         chunk_count=result["state"].get("chunk_count"),
     )
     return output

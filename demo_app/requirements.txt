@@ -3,5 +3,6 @@ pandas
 pillow
 requests
 openai
-starlette
+fastapi>=0.115,<1
+python-multipart>=0.0.20
 uvicorn

@@ -4,11 +4,13 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-import api
+from app.main import app
+from app.services import reports as report_service
 
 
 class ApiTest(unittest.TestCase):
@@ -28,9 +30,9 @@ class ApiTest(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-        self.patch = patch.object(api, "RUNS_ROOT", self.runs)
+        self.patch = patch.object(report_service, "settings", SimpleNamespace(runs_root=self.runs))
         self.patch.start()
-        self.client = TestClient(api.app)
+        self.client = TestClient(app)
 
     def tearDown(self):
         self.patch.stop()
@@ -45,6 +47,11 @@ class ApiTest(unittest.TestCase):
     def test_report_status_rejects_path_traversal(self):
         response = self.client.get("/api/reports/%2E%2E/status")
         self.assertIn(response.status_code, {400, 404})
+
+    def test_openapi_exposes_intake_and_run_contracts(self):
+        paths = self.client.get("/openapi.json").json()["paths"]
+        self.assertIn("/api/reports/upload", paths)
+        self.assertIn("/api/reports/{report_id}/run", paths)
 
 
 if __name__ == "__main__":

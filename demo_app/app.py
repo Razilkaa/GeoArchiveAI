@@ -5,8 +5,8 @@ import io
 import json
 import re
 import zipfile
-from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 import pandas as pd
 import requests
@@ -25,6 +25,16 @@ INBOX = PROJECT_ROOT / "reports_inbox"
 RUNS_ROOT = PROJECT_ROOT / "runs"
 BACKEND_URL = "http://127.0.0.1:8765"
 DEMO_REPORT_ID = "384092"
+
+
+def api_session() -> requests.Session:
+    session = requests.Session()
+    session.trust_env = False
+    return session
+
+
+def report_api_path(report_id: str) -> str:
+    return f"{BACKEND_URL}/api/reports/{quote(report_id, safe='')}"
 
 st.set_page_config(page_title="GeoArchive AI", page_icon="GA", layout="wide")
 
@@ -77,15 +87,14 @@ def load_demo_bundle() -> dict:
 
 @st.cache_data(ttl=10)
 def discover_reports() -> dict[str, str]:
-    reports: dict[str, str] = {}
-    for manifest_path in sorted(RUNS_ROOT.glob("*/job.json")):
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        report_id = str(manifest.get("report_id") or manifest_path.parent.name)
-        source_name = Path(str(manifest.get("source_root") or report_id)).name
-        reports[report_id] = f"{report_id} · {source_name}"
+    response = api_session().get(f"{BACKEND_URL}/api/reports", timeout=10)
+    response.raise_for_status()
+    reports = {}
+    for item in response.json().get("reports", []):
+        report_id = str(item["report_id"])
+        source_name = Path(str(item.get("source_root") or report_id)).name
+        status = str(item.get("worker_status") or "pending")
+        reports[report_id] = f"{report_id} · {source_name} · {status}"
     if DEMO_REPORT_ID in reports:
         reports[DEMO_REPORT_ID] = "384092 · Хампинская площадь · 1979–1980"
     return dict(sorted(reports.items(), key=lambda item: (item[0] != DEMO_REPORT_ID, item[0])))
@@ -114,32 +123,39 @@ def load_report_view(report_id: str) -> dict:
                     }
                 )
         return bundle
-    run_dir = RUNS_ROOT / report_id
-    manifest_path = run_dir / "job.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    result_path = run_dir / "orchestrator" / "report_result.json"
-    result = json.loads(result_path.read_text(encoding="utf-8")) if result_path.exists() else {}
-    groups = {"structures": [], "wells": [], "horizons": [], "survey_tasks": []}
-    plural = {"structure": "structures", "well": "wells", "horizon": "horizons", "finding": "survey_tasks"}
-    for entity in result.get("entities", []):
-        group = plural.get(entity.get("entity_type"))
-        if not group:
-            continue
-        attributes = dict(entity.get("attributes", {}))
-        item = {"name": entity.get("name", ""), **attributes, "evidence": entity.get("evidence", [])}
-        groups[group].append(item)
-    source_root = Path(manifest["source_root"])
-    contact_sheet = run_dir / "graphics_contact_sheet.jpg"
+    session = api_session()
+    status_response = session.get(f"{report_api_path(report_id)}/status", timeout=10)
+    status_response.raise_for_status()
+    status = status_response.json()
+    source_root = Path(str(status.get("source_root") or report_id))
+    result_response = session.get(report_api_path(report_id), timeout=15)
+    result = result_response.json() if result_response.ok else {}
+    raw_entities = result.get("entities", {})
+    groups = {
+        "structures": list(raw_entities.get("structures", [])) if isinstance(raw_entities, dict) else [],
+        "wells": list(raw_entities.get("wells", [])) if isinstance(raw_entities, dict) else [],
+        "horizons": list(raw_entities.get("horizons", [])) if isinstance(raw_entities, dict) else [],
+        "survey_tasks": list(raw_entities.get("key_results", [])) if isinstance(raw_entities, dict) else [],
+    }
+    if isinstance(raw_entities, list):
+        plural = {"structure": "structures", "well": "wells", "horizon": "horizons", "finding": "survey_tasks"}
+        for entity in raw_entities:
+            group = plural.get(entity.get("entity_type"))
+            if group:
+                groups[group].append({"name": entity.get("name", ""), **entity.get("attributes", {})})
+    artifact_response = session.get(f"{report_api_path(report_id)}/artifacts", timeout=10)
     artifacts = []
-    if contact_sheet.exists():
-        artifacts.append(
-            {
-                "id": f"{report_id}:contact-sheet",
-                "label": "Обзор графических материалов",
-                "type": "source_scan",
-                "path": str(contact_sheet),
-            }
-        )
+    if artifact_response.ok:
+        for index, artifact in enumerate(artifact_response.json().get("artifacts", [])):
+            media_type = str(artifact.get("media_type") or "")
+            artifacts.append(
+                {
+                    "id": f"{report_id}:{index}",
+                    "label": artifact.get("label") or artifact.get("name") or "Материал",
+                    "type": "source_scan" if media_type.startswith("image/") else "vector",
+                    "path": artifact.get("path"),
+                }
+            )
     return {
         "report": {
             "id": report_id,
@@ -147,7 +163,7 @@ def load_report_view(report_id: str) -> dict:
             "survey_party": "Архивный геолого-геофизический отчёт",
             "years": "не определено",
             "region": str(source_root.parent.name),
-            "status": result.get("status", "processing"),
+            "status": result.get("status", status.get("worker", {}).get("status", "pending")),
         },
         "summary": {
             "structures": len(groups["structures"]),
@@ -161,31 +177,21 @@ def load_report_view(report_id: str) -> dict:
 
 
 def load_operator_state(report_id: str) -> dict:
-    path = RUNS_ROOT / report_id / "orchestrator" / "state.json"
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+    response = api_session().get(f"{report_api_path(report_id)}/status", timeout=10)
+    return response.json().get("operator", {}) if response.ok else {}
 
 
 @st.cache_data(ttl=5)
 def load_processing_state(report_id: str) -> dict:
-    run_dir = RUNS_ROOT / report_id
-    payload = {"worker": {}, "privacy": {}, "manifest": {}}
-    for key, path in (
-        ("worker", run_dir / "worker" / "state.json"),
-        ("privacy", run_dir / "privacy.json"),
-        ("manifest", run_dir / "job.json"),
-    ):
-        if not path.exists():
-            continue
-        try:
-            payload[key] = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            pass
-    return payload
+    response = api_session().get(f"{report_api_path(report_id)}/status", timeout=10)
+    if not response.ok:
+        return {"worker": {}, "privacy": {}, "manifest": {}}
+    status = response.json()
+    return {
+        "worker": status.get("worker", {}),
+        "privacy": {},
+        "manifest": {"summary": status.get("summary", {}), "source_root": status.get("source_root")},
+    }
 
 
 @st.cache_data
@@ -228,14 +234,26 @@ def classify_upload(name: str, payload: bytes) -> dict[str, int]:
     return categories
 
 
-def submit_archive(upload) -> Path:
-    INBOX.mkdir(parents=True, exist_ok=True)
-    filename = clean_filename(upload.name)
-    target = INBOX / filename
-    if target.exists():
-        target = INBOX / f"{datetime.now():%Y%m%d_%H%M%S}_{filename}"
-    target.write_bytes(upload.getvalue())
-    return target
+def submit_archive(upload) -> dict:
+    upload.seek(0)
+    response = api_session().post(
+        f"{BACKEND_URL}/api/reports/upload",
+        files={"file": (clean_filename(upload.name), upload, upload.type or "application/octet-stream")},
+        timeout=60 * 60,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def run_report(report_id: str, retry_failed: bool = False) -> dict:
+    force = ["ragflow"] if retry_failed else []
+    response = api_session().post(
+        f"{report_api_path(report_id)}/run",
+        json={"force": force},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 def ask_report(report_id: str, question: str) -> dict:
@@ -292,9 +310,28 @@ with source_column:
     elif worker_status == "running":
         st.info(f"Обрабатывается · {page_count or 0} стр.")
     elif worker_status == "failed":
-        st.error("Обработка остановлена на одной из стадий")
+        failed_stages = [
+            (name, stage)
+            for name, stage in processing["worker"].get("stages", {}).items()
+            if stage.get("status") == "failed"
+        ]
+        if failed_stages:
+            stage_name, failed = failed_stages[0]
+            st.error(f"Сбой на стадии {stage_name}: {failed.get('detail') or failed.get('error') or 'неизвестная ошибка'}")
+        else:
+            st.error("Обработка остановлена")
     elif worker_status == "completed" and report_id != DEMO_REPORT_ID:
         st.success(f"Основная обработка завершена · {page_count or 0} стр.")
+    if report_id != DEMO_REPORT_ID and worker_status in {None, "pending", "blocked", "failed"}:
+        button_label = "Повторить с места сбоя" if worker_status == "failed" else "Запустить обработку"
+        if st.button(button_label, key=f"run:{report_id}", use_container_width=True):
+            try:
+                run_report(report_id, retry_failed=worker_status == "failed")
+                load_processing_state.clear()
+                discover_reports.clear()
+                st.rerun()
+            except requests.RequestException as error:
+                st.error(f"Не удалось запустить: {error}")
 
 with upload_column:
     st.markdown('<div class="ga-section">Новый архив</div>', unsafe_allow_html=True)
@@ -304,16 +341,22 @@ with upload_column:
         help="Файл сначала сохраняется в локальную очередь.",
     )
     if upload is not None:
-        payload = upload.getvalue()
-        classification = classify_upload(upload.name, payload)
+        payload = upload.getvalue() if upload.size <= 50 * 1024 * 1024 else b""
+        classification = classify_upload(upload.name, payload) if payload else {"Архив": 1}
         active = {name: count for name, count in classification.items() if count}
         st.caption("Предварительная локальная классификация")
         cols = st.columns(max(1, len(active)))
         for column, (name, count) in zip(cols, active.items()):
             column.metric(name, count)
         if st.button("Добавить в локальную очередь", type="primary", use_container_width=True):
-            saved = submit_archive(upload)
-            st.success(f"Архив добавлен: {saved.name}")
+            try:
+                result = submit_archive(upload)
+                discover_reports.clear()
+                load_processing_state.clear()
+                st.success(f"Загружено: {result.get('uploaded_name')}. Зарегистрировано отчётов: {result['registered']}")
+                st.rerun()
+            except requests.RequestException as error:
+                st.error(f"Ошибка загрузки: {error}")
 
 st.markdown('<div class="ga-section">Конвейер обработки</div>', unsafe_allow_html=True)
 operator_state = load_operator_state(report_id)

@@ -231,12 +231,13 @@ def run_agent(
 def retrieve_with_retry(
     ragflow: RagflowIngestor,
     dataset_id: str,
-    document_id: str,
+    document_id: str | list[str],
     query: str,
     attempts: int = 3,
     cache_dir: Path | None = None,
 ) -> list[dict[str, Any]]:
-    cache_key = hashlib.sha256(f"{dataset_id}\n{document_id}\n{query}".encode("utf-8")).hexdigest()
+    document_key = "\n".join(document_id) if isinstance(document_id, list) else document_id
+    cache_key = hashlib.sha256(f"{dataset_id}\n{document_key}\n{query}".encode("utf-8")).hexdigest()
     cache_path = cache_dir / f"retrieval_{cache_key}.json" if cache_dir else None
     if cache_path and cache_path.exists():
         return json.loads(cache_path.read_text(encoding="utf-8"))
@@ -270,7 +271,7 @@ def run_agents(
         or (metadata.get("state") or {}).get("dataset_id")
         or (metadata.get("document_state") or {}).get("dataset_id")
     )
-    document_id = metadata["document_id"]
+    document_id = metadata.get("document_ids") or metadata["document_id"]
     if not dataset_id:
         raise ValueError("RAGFlow metadata has no dataset_id")
     creds = read_credentials(credentials_file)
@@ -334,7 +335,8 @@ def run_agents(
         "report_id": manifest["report_id"],
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "dataset_id": dataset_id,
-        "document_id": document_id,
+        "document_id": metadata["document_id"],
+        "document_ids": metadata.get("document_ids") or [metadata["document_id"]],
         "elapsed_s": elapsed,
         "agents": results,
     }
