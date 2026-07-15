@@ -9,6 +9,9 @@ from fastapi import HTTPException
 from app.config import settings
 
 
+BASE_STAGES = ("page_routing", "fast_ocr", "markdown", "ragflow", "bundle")
+
+
 def read_json(path: Path, default: Any = None) -> Any:
     if not path.exists():
         return default
@@ -33,6 +36,14 @@ def status_payload(report_id: str) -> dict[str, Any]:
     directory = report_run_dir(report_id)
     manifest = read_json(directory / "job.json", {})
     worker = read_json(directory / "worker" / "state.json", {})
+    lock_exists = (directory / "worker" / "worker.lock").exists()
+    if lock_exists:
+        worker["status"] = "running"
+    elif worker.get("status") == "running" and all(
+        worker.get("stages", {}).get(name, {}).get("status") == "completed"
+        for name in BASE_STAGES
+    ):
+        worker["status"] = "completed"
     operator = read_json(directory / "orchestrator" / "state.json", {})
     return {
         "report_id": report_id,
@@ -48,13 +59,12 @@ def list_reports() -> list[dict[str, Any]]:
     for manifest_path in sorted(settings.runs_root.glob("*/job.json")):
         report_id = manifest_path.parent.name
         payload = status_payload(report_id)
-        lock_exists = (manifest_path.parent / "worker" / "worker.lock").exists()
         items.append(
             {
                 "report_id": report_id,
                 "source_root": payload["source_root"],
                 "summary": payload["summary"],
-                "worker_status": "running" if lock_exists else payload["worker"].get("status", "pending"),
+                "worker_status": payload["worker"].get("status", "pending"),
                 "operator_status": payload["operator"].get("status", "pending"),
             }
         )

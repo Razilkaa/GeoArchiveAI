@@ -64,6 +64,22 @@ class ApiTest(unittest.TestCase):
         report = next(item for item in reports if item["report_id"] == "375392")
         self.assertEqual(report["worker_status"], "running")
 
+    def test_stale_running_state_with_completed_core_is_normalized(self):
+        directory = self.runs / "375392"
+        worker = directory / "worker"
+        worker.mkdir()
+        stages = {
+            name: {"status": "completed"}
+            for name in ("page_routing", "fast_ocr", "markdown", "ragflow", "bundle")
+        }
+        (worker / "state.json").write_text(
+            json.dumps({"status": "running", "stages": stages}), encoding="utf-8"
+        )
+
+        response = self.client.get("/api/reports/375392/status")
+
+        self.assertEqual(response.json()["worker"]["status"], "completed")
+
     def test_maps_endpoint_returns_only_detected_maps(self):
         directory = self.runs / "375392"
         source = directory / "map.jpg"
