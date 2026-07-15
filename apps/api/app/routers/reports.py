@@ -11,7 +11,7 @@ from app.services.automation import reconcile_now
 from app.services.intake import save_upload
 from app.services.jobs import start_report
 from app.services.reports import artifact_payload, list_reports, map_payload, read_json, report_run_dir, status_payload
-from rag_service import CorpusAnswerService, ReportAnswerService, ReportConfig, load_report_configs
+from rag_service import ReportAnswerService, ReportConfig, load_report_configs
 
 
 router = APIRouter(prefix="/api", tags=["reports"])
@@ -46,18 +46,6 @@ def report_config(report_id: str) -> ReportConfig:
 
 def answer_service(report_id: str) -> ReportAnswerService:
     return ReportAnswerService(report_config(report_id))
-
-
-def corpus_answer_service() -> CorpusAnswerService:
-    corpus_configs = []
-    for item in list_reports():
-        try:
-            corpus_configs.append(report_config(str(item["report_id"])))
-        except (KeyError, OSError, ValueError):
-            continue
-    if not corpus_configs:
-        raise KeyError("corpus_search_not_ready")
-    return CorpusAnswerService(corpus_configs)
 
 
 @router.get("/reports")
@@ -147,22 +135,6 @@ async def ask(report_id: str, request: AskRequest) -> dict[str, Any]:
         return result
     try:
         return await run_in_threadpool(service.ask, question, request.mode == "live")
-    except ValueError as error:
-        raise HTTPException(400, str(error)) from error
-    except Exception as error:
-        raise HTTPException(502, f"upstream_failure:{type(error).__name__}") from error
-
-
-@router.post("/search")
-async def search_corpus(request: AskRequest) -> dict[str, Any]:
-    question = request.question.strip()
-    if not question:
-        raise HTTPException(400, "empty_question")
-    try:
-        service = corpus_answer_service()
-        return await run_in_threadpool(service.ask, question, request.mode == "live")
-    except KeyError as error:
-        raise HTTPException(409, "corpus_search_not_ready") from error
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
     except Exception as error:

@@ -246,16 +246,6 @@ def ask_report(report_id: str, question: str) -> dict:
     return response.json()
 
 
-def ask_corpus(question: str) -> dict:
-    response = api_session().post(
-        f"{BACKEND_URL}/api/search",
-        json={"question": question, "mode": "live"},
-        timeout=120,
-    )
-    response.raise_for_status()
-    return response.json()
-
-
 st.markdown(
     """
     <div class="ga-brand">
@@ -357,9 +347,7 @@ for column, (index, name, copy, state) in zip(agent_columns, agents):
                 unsafe_allow_html=True,
             )
 
-overview_tab, materials_tab, search_tab, corpus_tab = st.tabs(
-    ["Результаты", "Карты", "Поиск по отчёту", "Поиск по фонду"]
-)
+overview_tab, materials_tab, search_tab = st.tabs(["Результаты", "Карты", "Поиск по отчёту"])
 
 with overview_tab:
     metric_columns = st.columns(4)
@@ -468,35 +456,3 @@ with search_tab:
                         st.write(citation.get("excerpt", ""))
         except requests.RequestException as error:
             st.error(f"Поиск не выполнился: {error}")
-
-with corpus_tab:
-    st.subheader("Поиск по всем отчётам")
-    st.caption("Запрос выполняется по единому индексированному фонду и не зависит от выбранного отчёта.")
-    corpus_question_key = "corpus-question"
-    corpus_preset = "В каких отчётах и скважинах были получены притоки нефти, газа или воды?"
-    if st.button(corpus_preset, key="corpus-preset", use_container_width=True):
-        st.session_state[corpus_question_key] = corpus_preset
-    corpus_question = st.text_input(
-        "Вопрос по фонду",
-        key=corpus_question_key,
-        placeholder="Например: где были получены притоки нефти?",
-        label_visibility="collapsed",
-    )
-    if st.button("Найти по всем отчётам", type="primary", disabled=not corpus_question.strip()):
-        try:
-            with st.spinner("Ищем по всему фонду..."):
-                answer = ask_corpus(corpus_question.strip())
-            st.markdown(answer.get("answer") or "Ответ не найден.")
-            evidence = answer.get("evidence") or []
-            if evidence:
-                with st.expander("Источники"):
-                    for source in evidence:
-                        report_label = source.get("report_id") or "отчёт не определён"
-                        pages = ", ".join(source.get("evidence", []))
-                        st.caption(
-                            f"Отчёт {report_label} · {pages} · "
-                            f"релевантность {source.get('similarity', 0):.2f}"
-                        )
-                        st.write(source.get("excerpt", ""))
-        except requests.RequestException as error:
-            st.error(f"Поиск по фонду не выполнился: {error}")
