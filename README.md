@@ -67,6 +67,7 @@ python -m pip install -r requirements.txt
 python -m unittest discover -s pipeline -p "test_*.py" -q
 python -m unittest discover -s apps/api -p "test_*.py" -q
 python -m unittest discover -s services/map_digitizer/tests -p "test_*.py" -q
+python -m unittest discover -s services/ocr -p "test_*.py" -q
 ```
 
 Рабочие изменения фиксируются отдельными коммитами. Большие отчёты, OCR-вывод,
