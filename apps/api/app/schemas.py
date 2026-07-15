@@ -20,3 +20,5 @@ class IntakeResponse(BaseModel):
     report_ids: list[str]
     unsupported: list[str]
     uploaded_name: str | None = None
+    started: int = 0
+    queued: int = 0

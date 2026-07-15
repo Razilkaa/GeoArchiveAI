@@ -26,7 +26,7 @@ def start_report(report_id: str, force: list[str]) -> dict[str, Any]:
     directory = report_run_dir(report_id)
     lock = directory / "worker" / "worker.lock"
     if lock.exists():
-        raise HTTPException(409, "report_already_running")
+        return {"report_id": report_id, "status": "running", "pid": None, "force": force}
     invalid = set(force) - ALLOWED_FORCE_STAGES
     if invalid:
         raise HTTPException(400, f"invalid_force_stages:{','.join(sorted(invalid))}")

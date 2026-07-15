@@ -52,6 +52,32 @@ class ApiTest(unittest.TestCase):
         paths = self.client.get("/openapi.json").json()["paths"]
         self.assertIn("/api/reports/upload", paths)
         self.assertIn("/api/reports/{report_id}/run", paths)
+        self.assertIn("/api/queue", paths)
+
+    def test_worker_lock_is_reported_as_running(self):
+        lock = self.runs / "375392" / "worker" / "worker.lock"
+        lock.parent.mkdir()
+        lock.write_text("{}", encoding="utf-8")
+
+        reports = self.client.get("/api/reports").json()["reports"]
+
+        report = next(item for item in reports if item["report_id"] == "375392")
+        self.assertEqual(report["worker_status"], "running")
+
+    @patch("app.routers.reports.reconcile_now")
+    def test_scan_registers_and_starts_reports(self, reconcile):
+        reconcile.return_value = {
+            "registered": [{"report_id": "new-report"}],
+            "unsupported": [],
+            "started": ["new-report"],
+            "queued": ["next-report"],
+        }
+
+        response = self.client.post("/api/intake/scan")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["started"], 1)
+        self.assertEqual(response.json()["queued"], 1)
 
 
 if __name__ == "__main__":

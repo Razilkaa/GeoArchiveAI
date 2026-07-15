@@ -212,7 +212,7 @@ def submit_archive(upload) -> dict:
     return response.json()
 
 
-def run_report(report_id: str, retry_failed: bool = False) -> dict:
+def run_report(report_id: str) -> dict:
     response = api_session().post(
         f"{report_api_path(report_id)}/run",
         json={"force": []},
@@ -220,6 +220,42 @@ def run_report(report_id: str, retry_failed: bool = False) -> dict:
     )
     response.raise_for_status()
     return response.json()
+
+
+@st.fragment(run_every="7s")
+def render_processing_status(report_id: str) -> None:
+    processing = load_processing_state(report_id)
+    worker_status = processing["worker"].get("status")
+    page_count = processing["manifest"].get("summary", {}).get("page_count")
+    if worker_status in {None, "pending"}:
+        st.info(f"В очереди на обработку · {page_count or 0} стр.")
+    elif worker_status == "blocked":
+        st.warning(f"Зарегистрирован · {page_count or 0} стр. · ожидает повторного запуска")
+    elif worker_status == "running":
+        st.info(f"Обрабатывается · {page_count or 0} стр.")
+    elif worker_status == "failed":
+        failed_stages = [
+            (name, stage)
+            for name, stage in processing["worker"].get("stages", {}).items()
+            if stage.get("status") == "failed"
+        ]
+        if failed_stages:
+            stage_name, failed = failed_stages[0]
+            detail = failed.get("detail") or failed.get("error") or "неизвестная ошибка"
+            st.error(f"Сбой на стадии {stage_name}: {detail}")
+        else:
+            st.error("Обработка остановлена")
+    elif worker_status == "completed" and report_id != DEMO_REPORT_ID:
+        st.success(f"Основная обработка завершена · {page_count or 0} стр.")
+    if report_id != DEMO_REPORT_ID and worker_status in {"blocked", "failed"}:
+        if st.button("Повторить с места сбоя", key=f"run:{report_id}", use_container_width=True):
+            try:
+                run_report(report_id)
+                load_processing_state.clear()
+                discover_reports.clear()
+                st.rerun(scope="fragment")
+            except requests.RequestException as error:
+                st.error(f"Не удалось повторить: {error}")
 
 
 def ask_report(report_id: str, question: str) -> dict:
@@ -268,36 +304,7 @@ with source_column:
         """,
         unsafe_allow_html=True,
     )
-    processing = load_processing_state(report_id)
-    worker_status = processing["worker"].get("status")
-    page_count = processing["manifest"].get("summary", {}).get("page_count")
-    if worker_status == "blocked":
-        st.warning(f"Зарегистрирован · {page_count or 0} стр. · ожидает повторного запуска")
-    elif worker_status == "running":
-        st.info(f"Обрабатывается · {page_count or 0} стр.")
-    elif worker_status == "failed":
-        failed_stages = [
-            (name, stage)
-            for name, stage in processing["worker"].get("stages", {}).items()
-            if stage.get("status") == "failed"
-        ]
-        if failed_stages:
-            stage_name, failed = failed_stages[0]
-            st.error(f"Сбой на стадии {stage_name}: {failed.get('detail') or failed.get('error') or 'неизвестная ошибка'}")
-        else:
-            st.error("Обработка остановлена")
-    elif worker_status == "completed" and report_id != DEMO_REPORT_ID:
-        st.success(f"Основная обработка завершена · {page_count or 0} стр.")
-    if report_id != DEMO_REPORT_ID and worker_status in {None, "pending", "blocked", "failed"}:
-        button_label = "Повторить с места сбоя" if worker_status == "failed" else "Запустить обработку"
-        if st.button(button_label, key=f"run:{report_id}", use_container_width=True):
-            try:
-                run_report(report_id, retry_failed=worker_status == "failed")
-                load_processing_state.clear()
-                discover_reports.clear()
-                st.rerun()
-            except requests.RequestException as error:
-                st.error(f"Не удалось запустить: {error}")
+    render_processing_status(report_id)
 
 with upload_column:
     st.markdown('<div class="ga-section">Новый архив</div>', unsafe_allow_html=True)

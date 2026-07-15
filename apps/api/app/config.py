@@ -11,6 +11,10 @@ class Settings:
     ocr_api_url: str = os.getenv("OCR_API_URL", "http://127.0.0.1:18080")
     ragflow_url: str = os.getenv("RAGFLOW_URL", "https://ragflow-dev.finam.ru/api/v1")
     proxy_url: str = os.getenv("GEOARCHIVE_PROXY", "socks5h://127.0.0.1:7777")
+    auto_intake_enabled: bool = os.getenv("AUTO_INTAKE_ENABLED", "true").casefold() == "true"
+    auto_intake_interval_s: int = int(os.getenv("AUTO_INTAKE_INTERVAL_S", "10"))
+    auto_intake_settle_s: int = int(os.getenv("AUTO_INTAKE_SETTLE_S", "30"))
+    auto_max_reports: int = int(os.getenv("AUTO_MAX_REPORTS", "2"))
 
     @property
     def runs_root(self) -> Path:

@@ -6,6 +6,7 @@ import requests
 from fastapi import APIRouter
 
 from app.config import settings
+from app.services.automation import queue_status
 
 
 router = APIRouter(tags=["system"])
@@ -33,3 +34,8 @@ def services() -> dict[str, Any]:
         "ocr": ocr,
         "ragflow": {"url": settings.ragflow_url},
     }
+
+
+@router.get("/api/queue")
+def queue() -> dict[str, Any]:
+    return queue_status()

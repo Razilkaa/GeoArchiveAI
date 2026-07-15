@@ -7,7 +7,8 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
 from app.schemas import AskRequest, IntakeResponse, RunRequest
-from app.services.intake import register_inbox, save_upload
+from app.services.automation import reconcile_now
+from app.services.intake import save_upload
 from app.services.jobs import start_report
 from app.services.reports import artifact_payload, list_reports, read_json, report_run_dir, status_payload
 from rag_service import ReportAnswerService, load_report_configs
@@ -32,20 +33,22 @@ def reports() -> dict[str, Any]:
 
 @router.post("/intake/scan", response_model=IntakeResponse)
 async def scan_inbox() -> IntakeResponse:
-    summary = await run_in_threadpool(register_inbox)
+    summary = await run_in_threadpool(reconcile_now)
     registered = summary.get("registered", [])
     return IntakeResponse(
         status="completed",
         registered=len(registered),
         report_ids=[str(item["report_id"]) for item in registered],
         unsupported=[str(item) for item in summary.get("unsupported", [])],
+        started=len(summary.get("started", [])),
+        queued=len(summary.get("queued", [])),
     )
 
 
 @router.post("/reports/upload", response_model=IntakeResponse)
 async def upload_report(file: UploadFile = File(...)) -> IntakeResponse:
     saved = await run_in_threadpool(save_upload, file.filename or "archive.zip", file.file)
-    summary = await run_in_threadpool(register_inbox)
+    summary = await run_in_threadpool(reconcile_now)
     registered = summary.get("registered", [])
     return IntakeResponse(
         status="completed",
@@ -53,6 +56,8 @@ async def upload_report(file: UploadFile = File(...)) -> IntakeResponse:
         report_ids=[str(item["report_id"]) for item in registered],
         unsupported=[str(item) for item in summary.get("unsupported", [])],
         uploaded_name=saved.name,
+        started=len(summary.get("started", [])),
+        queued=len(summary.get("queued", [])),
     )
 
 

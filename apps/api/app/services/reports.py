@@ -48,12 +48,13 @@ def list_reports() -> list[dict[str, Any]]:
     for manifest_path in sorted(settings.runs_root.glob("*/job.json")):
         report_id = manifest_path.parent.name
         payload = status_payload(report_id)
+        lock_exists = (manifest_path.parent / "worker" / "worker.lock").exists()
         items.append(
             {
                 "report_id": report_id,
                 "source_root": payload["source_root"],
                 "summary": payload["summary"],
-                "worker_status": payload["worker"].get("status", "pending"),
+                "worker_status": "running" if lock_exists else payload["worker"].get("status", "pending"),
                 "operator_status": payload["operator"].get("status", "pending"),
             }
         )
