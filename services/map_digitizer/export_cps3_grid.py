@@ -13,6 +13,7 @@ import matplotlib
 import numpy as np
 from pyproj import CRS
 from scipy.interpolate import LinearNDInterpolator
+from scipy.ndimage import label as label_components
 from scipy.sparse import csr_matrix
 from scipy.sparse.linalg import spsolve
 from scipy.spatial import cKDTree
@@ -83,6 +84,7 @@ def build_harmonic_grid(
     cell_size: float = 250.0,
     blanking_distance: float = 4_000.0,
     constraint_weight: float = 20.0,
+    support_contours: gpd.GeoDataFrame | None = None,
 ) -> tuple[Grid, dict]:
     """Interpolate between regularized contour constraints without overshoot.
 
@@ -91,16 +93,20 @@ def build_harmonic_grid(
     and produces one continuous surface whose derived contours cannot cross.
     """
     points, values = sample_contours(contours, min(cell_size * 0.5, 125.0))
-    min_x, min_y = np.floor(points.min(axis=0) / cell_size) * cell_size
-    max_x, max_y = np.ceil(points.max(axis=0) / cell_size) * cell_size
+    support = support_contours if support_contours is not None and len(support_contours) else contours
+    support_points, _ = sample_contours(
+        support.assign(value_km=0.0), min(cell_size * 0.5, 125.0)
+    )
+    min_x, min_y = np.floor(support_points.min(axis=0) / cell_size) * cell_size
+    max_x, max_y = np.ceil(support_points.max(axis=0) / cell_size) * cell_size
     x = np.arange(min_x, max_x + cell_size * 0.5, cell_size)
     y = np.arange(min_y, max_y + cell_size * 0.5, cell_size)
     grid_x, grid_y = np.meshgrid(x, y)
     nodes = np.column_stack([grid_x.ravel(), grid_y.ravel()])
 
-    distance, _ = cKDTree(points).query(nodes, k=1)
-    if len(points) >= 3:
-        inside_hull = Delaunay(points).find_simplex(nodes) >= 0
+    distance, _ = cKDTree(support_points).query(nodes, k=1)
+    if len(support_points) >= 3:
+        inside_hull = Delaunay(support_points).find_simplex(nodes) >= 0
     else:
         inside_hull = np.ones(len(nodes), dtype=bool)
     mask = (distance <= blanking_distance) & inside_hull
@@ -116,6 +122,17 @@ def build_harmonic_grid(
             cell_values.setdefault((int(r), int(c)), []).append(float(value))
     fixed = {cell: float(np.median(items)) for cell, items in cell_values.items()}
     conflict_cells = sum(max(items) - min(items) > 1.0 for items in cell_values.values())
+
+    # Keep only connected support regions that contain at least one trusted
+    # value. This expands to unlabelled traced margins without inventing a
+    # surface for detached, unconstrained map decoration.
+    component_map, component_count = label_components(mask)
+    constrained_components = {
+        int(component_map[r, c]) for r, c in fixed if component_map[r, c] > 0
+    }
+    if component_count:
+        mask = np.isin(component_map, list(constrained_components))
+        fixed = {cell: value for cell, value in fixed.items() if mask[cell]}
 
     active = [tuple(item) for item in np.argwhere(mask)]
     active_index = {cell: index for index, cell in enumerate(active)}
@@ -156,6 +173,8 @@ def build_harmonic_grid(
     quality = {
         "method": "harmonic_regularized_contours",
         "constraint_points": int(len(points)),
+        "support_points": int(len(support_points)),
+        "support_components": int(len(constrained_components)),
         "fixed_cells": int(len(fixed)),
         "constraint_weight": float(constraint_weight),
         "conflicting_fixed_cells": int(conflict_cells),
@@ -294,21 +313,24 @@ def export_surface(
     blanking_distance: float = 4_000.0,
     include_inferred: bool = False,
 ) -> dict:
-    contours = gpd.read_file(source, layer="isolines")
-    contours = contours[
-        contours["value_km"].notna()
-        & contours["kind"].eq("isoline")
-        & contours["verdict"].fillna("").ne("flagged")
+    all_contours = gpd.read_file(source, layer="isolines")
+    support_contours = all_contours[all_contours["kind"].eq("isoline")].copy()
+    contours = all_contours[
+        all_contours["value_km"].notna()
+        & all_contours["kind"].eq("isoline")
+        & all_contours["verdict"].fillna("").ne("flagged")
     ].copy()
     if not include_inferred:
         contours = contours[contours["source"].eq("label")].copy()
     if contours.empty:
         raise ValueError("No trusted valued contours are available for gridding")
     contours = contours.set_crs(source_crs, allow_override=True).to_crs(target_crs)
+    support_contours = support_contours.set_crs(source_crs, allow_override=True).to_crs(target_crs)
     grid, quality = build_harmonic_grid(
         contours,
         cell_size=cell_size,
         blanking_distance=blanking_distance,
+        support_contours=support_contours,
     )
     reconstructed = extract_surface_contours(grid)
     quality["topology"] = contour_topology(reconstructed)
