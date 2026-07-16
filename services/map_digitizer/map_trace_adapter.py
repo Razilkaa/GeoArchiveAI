@@ -72,6 +72,8 @@ def build_map_result(
     grid_preview_path = trace_dir / "sheet_23_horizon_k_gk42_21n.png"
     grid_21n_path = trace_dir / "sheet_23_horizon_k_gk42_21n.cps3"
     grid_19n_path = trace_dir / "sheet_23_horizon_k_gk42_19n.cps3"
+    grid_isolines_path = trace_dir / "sheet_23_horizon_k_gk42_21n_isolines.geojson"
+    grid_metadata_path = trace_dir / "sheet_23_horizon_k_gk42_21n.json"
 
     valued = load_json(valued_path)
     crosscheck = load_json(crosscheck_path)
@@ -92,6 +94,9 @@ def build_map_result(
     closures = sum(bool(item.get("properties", {}).get("closed")) for item in features)
     crossing_pairs = crossing_isoline_pairs(features)
     georeference = load_json(georeference_path) if georeference_path.exists() else None
+    grid_metadata = load_json(grid_metadata_path) if grid_metadata_path.exists() else None
+    grid_quality = grid_metadata.get("quality", {}) if grid_metadata else {}
+    final_topology = grid_quality.get("topology", {})
 
     reasons = []
     if ratio(profile_leaks, candidate_count) > 0.1:
@@ -133,6 +138,14 @@ def build_map_result(
         "closed_contours": closures,
         "crossing_isoline_pairs": len(crossing_pairs),
         "crossing_pair_ids": crossing_pairs,
+        "final_surface_method": grid_quality.get("method"),
+        "final_surface_input_policy": (
+            grid_metadata.get("input_policy") if grid_metadata else None
+        ),
+        "final_surface_constraint_rmse_m": grid_quality.get("constraint_rmse_m"),
+        "final_surface_constraint_p95_m": grid_quality.get("constraint_p95_abs_error_m"),
+        "final_surface_crossing_pairs": final_topology.get("crossing_pairs"),
+        "final_surface_value_range_preserved": grid_quality.get("value_range_preserved"),
         "structures": len(crosscheck.get("structures", [])),
         "contour_interval_km": valued.get("contour_step_km"),
         "source_breakdown": dict(sources),
@@ -163,6 +176,15 @@ def build_map_result(
                     },
                 ]
             )
+            if grid_isolines_path.exists():
+                artifacts.append(
+                    {
+                        "name": "surface_isolines_21n",
+                        "label": "Реконструированные изолинии · ГК-42 21N · GeoJSON",
+                        "path": str(grid_isolines_path.resolve()),
+                        "media_type": "application/geo+json",
+                    }
+                )
         artifacts.extend([
             {
                 "name": "georeferenced_preview",

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,8 +13,12 @@ import matplotlib
 import numpy as np
 from pyproj import CRS
 from scipy.interpolate import LinearNDInterpolator
+from scipy.sparse import csr_matrix
+from scipy.sparse.linalg import spsolve
 from scipy.spatial import cKDTree
+from scipy.spatial import Delaunay
 from shapely.geometry import LineString
+from skimage.measure import find_contours
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -72,6 +77,148 @@ def build_grid(
     return Grid(x=x, y=y, z=z, crs=CRS.from_user_input(contours.crs))
 
 
+def build_harmonic_grid(
+    contours: gpd.GeoDataFrame,
+    *,
+    cell_size: float = 250.0,
+    blanking_distance: float = 4_000.0,
+    constraint_weight: float = 20.0,
+) -> tuple[Grid, dict]:
+    """Interpolate between regularized contour constraints without overshoot.
+
+    A discrete Laplace solution is preferable to unconstrained RBF/triangulation
+    here: it honours the digitized contours, remains inside their value range,
+    and produces one continuous surface whose derived contours cannot cross.
+    """
+    points, values = sample_contours(contours, min(cell_size * 0.5, 125.0))
+    min_x, min_y = np.floor(points.min(axis=0) / cell_size) * cell_size
+    max_x, max_y = np.ceil(points.max(axis=0) / cell_size) * cell_size
+    x = np.arange(min_x, max_x + cell_size * 0.5, cell_size)
+    y = np.arange(min_y, max_y + cell_size * 0.5, cell_size)
+    grid_x, grid_y = np.meshgrid(x, y)
+    nodes = np.column_stack([grid_x.ravel(), grid_y.ravel()])
+
+    distance, _ = cKDTree(points).query(nodes, k=1)
+    if len(points) >= 3:
+        inside_hull = Delaunay(points).find_simplex(nodes) >= 0
+    else:
+        inside_hull = np.ones(len(nodes), dtype=bool)
+    mask = (distance <= blanking_distance) & inside_hull
+    mask = mask.reshape(grid_x.shape)
+
+    # Burn every source contour into grid cells. Conflicting values in one cell
+    # are retained as a QC signal and resolved by a median, never silently.
+    col = np.clip(np.rint((points[:, 0] - x[0]) / cell_size).astype(int), 0, len(x) - 1)
+    row = np.clip(np.rint((points[:, 1] - y[0]) / cell_size).astype(int), 0, len(y) - 1)
+    cell_values: dict[tuple[int, int], list[float]] = {}
+    for r, c, value in zip(row, col, values):
+        if mask[r, c]:
+            cell_values.setdefault((int(r), int(c)), []).append(float(value))
+    fixed = {cell: float(np.median(items)) for cell, items in cell_values.items()}
+    conflict_cells = sum(max(items) - min(items) > 1.0 for items in cell_values.values())
+
+    active = [tuple(item) for item in np.argwhere(mask)]
+    active_index = {cell: index for index, cell in enumerate(active)}
+    matrix_rows: list[int] = []
+    matrix_cols: list[int] = []
+    matrix_data: list[float] = []
+    rhs = np.zeros(len(active), dtype=float)
+    neighbours = ((-1, 0), (1, 0), (0, -1), (0, 1))
+    for index, (r, c) in enumerate(active):
+        degree = 0
+        for dr, dc in neighbours:
+            nr, nc = r + dr, c + dc
+            if nr < 0 or nr >= len(y) or nc < 0 or nc >= len(x) or not mask[nr, nc]:
+                continue
+            degree += 1
+            neighbour = (nr, nc)
+            matrix_rows.append(index)
+            matrix_cols.append(active_index[neighbour])
+            matrix_data.append(-1.0)
+        diagonal = float(max(degree, 1))
+        if (r, c) in fixed:
+            diagonal += constraint_weight
+            rhs[index] += constraint_weight * fixed[(r, c)]
+        matrix_rows.append(index)
+        matrix_cols.append(index)
+        matrix_data.append(diagonal)
+
+    z = np.full(grid_x.shape, np.nan, dtype=float)
+    if active:
+        matrix = csr_matrix((matrix_data, (matrix_rows, matrix_cols)), shape=(len(active), len(active)))
+        solution = spsolve(matrix, rhs)
+        for (r, c), value in zip(active, solution):
+            z[r, c] = value
+
+    sampled = z[row, col]
+    residual = sampled - values
+    residual = residual[np.isfinite(residual)]
+    quality = {
+        "method": "harmonic_regularized_contours",
+        "constraint_points": int(len(points)),
+        "fixed_cells": int(len(fixed)),
+        "constraint_weight": float(constraint_weight),
+        "conflicting_fixed_cells": int(conflict_cells),
+        "constraint_rmse_m": float(np.sqrt(np.mean(residual ** 2))) if len(residual) else None,
+        "constraint_p95_abs_error_m": (
+            float(np.percentile(np.abs(residual), 95)) if len(residual) else None
+        ),
+        "value_range_preserved": bool(
+            np.nanmin(z) >= values.min() - 1e-6 and np.nanmax(z) <= values.max() + 1e-6
+        ),
+    }
+    return Grid(x=x, y=y, z=z, crs=CRS.from_user_input(contours.crs)), quality
+
+
+def extract_surface_contours(grid: Grid, interval: float = 200.0) -> gpd.GeoDataFrame:
+    """Vectorize final grid contours; these are the production map lines."""
+    finite = grid.z[np.isfinite(grid.z)]
+    first = math.ceil(float(finite.min()) / interval) * interval
+    last = math.floor(float(finite.max()) / interval) * interval
+    levels = np.arange(first, last + interval * 0.5, interval)
+    mask = np.isfinite(grid.z)
+    rows = []
+    dx = float(grid.x[1] - grid.x[0]) if len(grid.x) > 1 else 0.0
+    dy = float(grid.y[1] - grid.y[0]) if len(grid.y) > 1 else 0.0
+    for level in levels:
+        for path in find_contours(grid.z, float(level), mask=mask):
+            if len(path) < 4:
+                continue
+            coordinates = [
+                (float(grid.x[0] + point[1] * dx), float(grid.y[0] + point[0] * dy))
+                for point in path
+            ]
+            line = LineString(coordinates)
+            if line.length < max(dx, dy) * 2:
+                continue
+            rows.append(
+                {
+                    "value_m": float(level),
+                    "value_km": float(level / 1_000.0),
+                    "closed": bool(np.linalg.norm(path[0] - path[-1]) <= 1.5),
+                    "geometry": line,
+                }
+            )
+    return gpd.GeoDataFrame(rows, geometry="geometry", crs=grid.crs)
+
+
+def contour_topology(contours: gpd.GeoDataFrame) -> dict:
+    crossings = []
+    records = list(contours.itertuples())
+    for left_index, left in enumerate(records):
+        for right_index in range(left_index + 1, len(records)):
+            right = records[right_index]
+            if left.geometry.crosses(right.geometry):
+                crossings.append([left_index, right_index])
+    return {
+        "segments": len(contours),
+        "levels": int(contours["value_m"].nunique()) if len(contours) else 0,
+        "closed_segments": int(contours["closed"].sum()) if len(contours) else 0,
+        "crossing_pairs": len(crossings),
+        "crossing_pair_ids": crossings,
+    }
+
+
 def write_cps3(grid: Grid, output: Path, name: str) -> None:
     finite = grid.z[np.isfinite(grid.z)]
     if finite.size == 0:
@@ -115,11 +262,18 @@ def write_xyz(grid: Grid, output: Path) -> None:
                     stream.write(f"{x_value:.3f} {y_value:.3f} {z_value:.3f}\n")
 
 
-def render_preview(grid: Grid, contours: gpd.GeoDataFrame, output: Path, title: str) -> None:
+def render_preview(
+    grid: Grid,
+    source_contours: gpd.GeoDataFrame,
+    reconstructed: gpd.GeoDataFrame,
+    output: Path,
+    title: str,
+) -> None:
     fig, ax = plt.subplots(figsize=(11, 10), dpi=150)
     masked = np.ma.masked_invalid(grid.z)
     image = ax.pcolormesh(grid.x, grid.y, masked, shading="auto", cmap="viridis_r")
-    contours.plot(ax=ax, color="white", linewidth=0.45, alpha=0.7)
+    reconstructed.plot(ax=ax, color="#101010", linewidth=0.7, alpha=0.9)
+    source_contours.plot(ax=ax, color="white", linewidth=0.5, alpha=0.8)
     fig.colorbar(image, ax=ax, label="Depth/elevation, m")
     ax.set_title(title)
     ax.set_xlabel("Easting, m")
@@ -138,6 +292,7 @@ def export_surface(
     source_crs: str = "EPSG:28479",
     cell_size: float = 250.0,
     blanking_distance: float = 4_000.0,
+    include_inferred: bool = False,
 ) -> dict:
     contours = gpd.read_file(source, layer="isolines")
     contours = contours[
@@ -145,23 +300,43 @@ def export_surface(
         & contours["kind"].eq("isoline")
         & contours["verdict"].fillna("").ne("flagged")
     ].copy()
+    if not include_inferred:
+        contours = contours[contours["source"].eq("label")].copy()
+    if contours.empty:
+        raise ValueError("No trusted valued contours are available for gridding")
     contours = contours.set_crs(source_crs, allow_override=True).to_crs(target_crs)
-    grid = build_grid(contours, cell_size=cell_size, blanking_distance=blanking_distance)
+    grid, quality = build_harmonic_grid(
+        contours,
+        cell_size=cell_size,
+        blanking_distance=blanking_distance,
+    )
+    reconstructed = extract_surface_contours(grid)
+    quality["topology"] = contour_topology(reconstructed)
 
     crs = CRS.from_user_input(target_crs)
     zone = "gk42_21n" if crs.to_epsg() == 28481 else "gk42_19n"
-    stem = f"sheet_23_horizon_k_{zone}"
+    match = re.search(r"sheet[_-]?(\d+)", source.stem, flags=re.IGNORECASE)
+    sheet_name = f"sheet_{match.group(1)}" if match else source.stem
+    stem = f"{sheet_name}_horizon_k_{zone}"
     output_dir.mkdir(parents=True, exist_ok=True)
     cps3_path = output_dir / f"{stem}.cps3"
     xyz_path = output_dir / f"{stem}.xyz"
     prj_path = output_dir / f"{stem}.prj"
     preview_path = output_dir / f"{stem}.png"
     metadata_path = output_dir / f"{stem}.json"
+    contours_path = output_dir / f"{stem}_isolines.geojson"
 
     write_cps3(grid, cps3_path, "Horizon_K_depth_m")
     write_xyz(grid, xyz_path)
     prj_path.write_text(crs.to_wkt("WKT1_ESRI"), encoding="ascii")
-    render_preview(grid, contours, preview_path, f"Horizon K grid | {crs.name} | REVIEW")
+    reconstructed.to_file(contours_path, driver="GeoJSON")
+    render_preview(
+        grid,
+        contours,
+        reconstructed,
+        preview_path,
+        f"Horizon K | reconstructed contours | {crs.name} | REVIEW",
+    )
 
     finite = grid.z[np.isfinite(grid.z)]
     metadata = {
@@ -181,11 +356,14 @@ def export_surface(
         "z_max_m": float(finite.max()),
         "z_unit": "m",
         "input_contours": len(contours),
+        "input_policy": "labels_and_inferred" if include_inferred else "trusted_labels_only",
+        "quality": quality,
         "files": {
             "cps3": str(cps3_path),
             "xyz": str(xyz_path),
             "prj": str(prj_path),
             "preview": str(preview_path),
+            "isolines": str(contours_path),
         },
         "warning": "Georeferencing and contour values are provisional; validate against a labelled cross-profile.",
     }
@@ -201,6 +379,7 @@ def main() -> None:
     parser.add_argument("--source-crs", default="EPSG:28479")
     parser.add_argument("--cell-size", type=float, default=250.0)
     parser.add_argument("--blanking-distance", type=float, default=4_000.0)
+    parser.add_argument("--include-inferred", action="store_true")
     args = parser.parse_args()
     result = export_surface(
         args.source,
@@ -209,6 +388,7 @@ def main() -> None:
         source_crs=args.source_crs,
         cell_size=args.cell_size,
         blanking_distance=args.blanking_distance,
+        include_inferred=args.include_inferred,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

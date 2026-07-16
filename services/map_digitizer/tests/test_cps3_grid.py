@@ -5,12 +5,48 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+import geopandas as gpd
 from pyproj import CRS
+from shapely.geometry import LineString
 
-from services.map_digitizer.export_cps3_grid import Grid, NULL_VALUE, write_cps3
+from services.map_digitizer.export_cps3_grid import (
+    Grid,
+    NULL_VALUE,
+    build_harmonic_grid,
+    contour_topology,
+    extract_surface_contours,
+    write_cps3,
+)
 
 
 class Cps3GridTest(unittest.TestCase):
+    def test_harmonic_grid_honours_contours_without_overshoot(self):
+        contours = gpd.GeoDataFrame(
+            {
+                "value_km": [-1.0, -2.0, -3.0],
+                "geometry": [
+                    LineString([(0, 0), (1000, 0)]),
+                    LineString([(0, 1000), (1000, 1000)]),
+                    LineString([(0, 2000), (1000, 2000)]),
+                ],
+            },
+            crs="EPSG:28481",
+        )
+
+        grid, quality = build_harmonic_grid(
+            contours,
+            cell_size=250.0,
+            blanking_distance=2_000.0,
+        )
+
+        self.assertGreater(np.isfinite(grid.z).sum(), 0)
+        self.assertGreaterEqual(np.nanmin(grid.z), -3000.0)
+        self.assertLessEqual(np.nanmax(grid.z), -1000.0)
+        self.assertTrue(quality["value_range_preserved"])
+        self.assertLess(quality["constraint_p95_abs_error_m"], 50.0)
+        reconstructed = extract_surface_contours(grid, interval=250.0)
+        self.assertEqual(contour_topology(reconstructed)["crossing_pairs"], 0)
+
     def test_writes_all_nodes_in_cps3_column_major_top_down_order(self):
         grid = Grid(
             x=np.array([100.0, 200.0]),
