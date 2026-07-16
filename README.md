@@ -81,6 +81,29 @@ GPU-сервисом, а RAGFlow остаётся отдельным храни�
 перепроецирования. Текущий результат имеет статус `REVIEW`, пока профильная
 геопривязка не подтверждена дополнительной контрольной линией.
 
+## RAG benchmark
+
+Эталонные вопросы хранятся в `benchmarks/rag/`. Проверка разделяет потери по
+слоям: наличие страницы в OCR Markdown, сохранность ключевых фактов и чисел,
+позиция эталонной страницы в выдаче RAGFlow и сетевые ошибки retrieval.
+
+```powershell
+$env:PYTHONPATH="apps/api;."
+python apps/api/rag_benchmark.py `
+  benchmarks/rag/384092.json `
+  runs/384092/report_384092_fast_ocr.md `
+  runs/384092/ragflow.json `
+  secrets/ragflow_token.txt `
+  --output runs/384092/rag_benchmark.json `
+  --manifest runs/384092/job.json `
+  --limit 10
+```
+
+Результаты сохраняются одновременно в JSON и Markdown. Базовые целевые пороги
+для MVP: OCR page/fact recall не ниже 95%, retrieval Hit@5 не ниже 90% на
+доступных OCR-фактах, отсутствие timeout/error. Новые отчёты и старые фонды при
+повторном запуске ставят в OCR все текстовые страницы и оглавления.
+
 ## Разработка
 
 ```powershell

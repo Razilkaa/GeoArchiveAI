@@ -20,8 +20,10 @@ from factory_runner import (
     run_fast_ocr,
     run_api_ocr,
     run_vision_ocr,
+    save_manifest,
 )
 from page_router import route_pages
+from report_factory import ensure_full_text_strategy
 from report_orchestrator import ReportOrchestrator
 
 
@@ -90,6 +92,8 @@ class JobWorker:
         self.run_dir = self.manifest_path.parent
         self.config = config
         self.manifest = load_manifest(self.manifest_path)
+        if ensure_full_text_strategy(self.manifest):
+            save_manifest(self.manifest_path, self.manifest)
         self.report_id = str(self.manifest["report_id"])
         self.state_path = self.run_dir / "worker" / "state.json"
         self.state = self._load_state()
@@ -137,6 +141,10 @@ class JobWorker:
         output_dir = self.run_dir / "fast_ocr" / "output"
         try:
             queue = _read_json(queue_path, [])
+            queued_page_ids = {str(item["page_id"]) for item in queue}
+            expected_page_ids = set(load_manifest(self.manifest_path)["queues"]["fast_ocr"])
+            if queued_page_ids != expected_page_ids:
+                return False
             expected = {
                 f"{Path(item['input_name']).stem}_res.json"
                 for item in queue
@@ -150,13 +158,21 @@ class JobWorker:
 
     def _markdown_valid(self) -> bool:
         path = self._markdown_path()
-        return path.exists() and path.stat().st_size > 100
+        if not path.exists() or path.stat().st_size <= 100:
+            return False
+        text = path.read_text(encoding="utf-8")
+        return all(
+            f"[SOURCE_PAGE: {page_id};" in text
+            for page_id in load_manifest(self.manifest_path)["queues"]["fast_ocr"]
+        )
 
     def _ragflow_path(self) -> Path:
         return self.run_dir / "ragflow.json"
 
     def _ragflow_valid(self) -> bool:
-        return _valid_json(
+        if not self._ragflow_path().exists() or not self._markdown_path().exists():
+            return False
+        return self._ragflow_path().stat().st_mtime_ns >= self._markdown_path().stat().st_mtime_ns and _valid_json(
             self._ragflow_path(),
             lambda value: bool(value.get("document_id")) and (value.get("state") or {}).get("run") == "DONE",
         )
@@ -175,7 +191,9 @@ class JobWorker:
         return self.run_dir / "result_bundle.json"
 
     def _bundle_valid(self) -> bool:
-        return _valid_json(
+        if not self._bundle_path().exists() or not self._ragflow_path().exists():
+            return False
+        return self._bundle_path().stat().st_mtime_ns >= self._ragflow_path().stat().st_mtime_ns and _valid_json(
             self._bundle_path(),
             lambda value: value.get("report_id") == self.report_id
             and value.get("status") in {"completed", "review"},

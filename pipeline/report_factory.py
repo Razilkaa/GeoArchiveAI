@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -92,29 +92,27 @@ def discover_pages(report_root: Path) -> list[dict[str, Any]]:
     return pages
 
 
-def choose_fast_ocr(pages: list[dict[str, Any]], front: int = 6, tail: int = 18) -> None:
-    text_by_volume: dict[str, list[dict[str, Any]]] = defaultdict(list)
+def choose_fast_ocr(pages: list[dict[str, Any]]) -> None:
     for page in pages:
         if page["role"] == "text":
-            text_by_volume[page.get("volume") or "unassigned"].append(page)
+            page["fast_ocr"] = True
+            if "full_text_corpus" not in page["fast_ocr_reasons"]:
+                page["fast_ocr_reasons"].append("full_text_corpus")
         elif page["role"] == "toc":
             page["fast_ocr"] = True
-            page["fast_ocr_reasons"].append("explicit_toc")
+            if "explicit_toc" not in page["fast_ocr_reasons"]:
+                page["fast_ocr_reasons"].append("explicit_toc")
 
-    for volume_pages in text_by_volume.values():
-        ordered = sorted(
-            volume_pages,
-            key=lambda item: (
-                item["page_number"] is None,
-                item["page_number"] if item["page_number"] is not None else item["relative_path"],
-            ),
-        )
-        for page in ordered[:front]:
-            page["fast_ocr"] = True
-            page["fast_ocr_reasons"].append("front_matter")
-        for page in ordered[-tail:]:
-            page["fast_ocr"] = True
-            page["fast_ocr_reasons"].append("conclusions_and_appendices")
+
+def ensure_full_text_strategy(manifest: dict[str, Any]) -> bool:
+    before = set(manifest.get("queues", {}).get("fast_ocr", []))
+    previous_strategy = manifest.get("strategy")
+    choose_fast_ocr(manifest["pages"])
+    selected = [page["id"] for page in manifest["pages"] if page["fast_ocr"]]
+    manifest.setdefault("queues", {})["fast_ocr"] = selected
+    manifest.setdefault("summary", {})["fast_ocr_pages"] = len(selected)
+    manifest["strategy"] = "full_text_fast_path"
+    return before != set(selected) or previous_strategy != manifest["strategy"]
 
 
 def build_manifest(report_root: Path, report_id: str | None = None) -> dict[str, Any]:
@@ -133,7 +131,7 @@ def build_manifest(report_root: Path, report_id: str | None = None) -> dict[str,
         "report_id": report_id or report_root.name,
         "source_root": str(report_root),
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "strategy": "selective_fast_path",
+        "strategy": "full_text_fast_path",
         "targets": ["structures", "wells", "maps", "horizons", "key_results"],
         "pages": pages,
         "queues": {
