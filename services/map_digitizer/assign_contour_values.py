@@ -16,7 +16,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-LABEL_PATTERN = re.compile(r"^-[0-9]+\.[0-9]{1,2}$")
+LABEL_PATTERN = re.compile(r"^-[0-9]+(?:\.[0-9]{1,2})?$")
 
 
 def straightness(points: np.ndarray) -> float:
@@ -36,8 +36,25 @@ def normalized_label(text: str, interval: float, tolerance: float) -> float | No
     if not LABEL_PATTERN.match(text):
         return None
     value = float(text)
+    # Soviet maps commonly label the same depth either as -2.8 km or -2800 m.
+    if abs(value) >= 100.0 and interval < 10.0:
+        value /= 1000.0
     snapped = round(value / interval) * interval
     return round(snapped, 3) if abs(value - snapped) <= tolerance else None
+
+
+def dominant_value_band(values: list[float], interval: float) -> tuple[float, float] | None:
+    """Keep the repeated contour band and reject distant profile-number clusters."""
+    if len(values) < 6:
+        return None
+    ordered = np.sort(np.asarray(values, dtype=float))
+    gaps = np.diff(ordered)
+    split_points = np.where(gaps > max(interval * 4.0, 0.8))[0]
+    groups = np.split(ordered, split_points + 1)
+    group = max(groups, key=lambda item: (len(item), -np.ptp(item)))
+    if len(group) < max(3, len(values) * 0.25):
+        return None
+    return float(group.min() - interval), float(group.max() + interval)
 
 
 def assign_values(
@@ -54,6 +71,7 @@ def assign_values(
         profile_leaks.append(straightness(points) < 0.035 and length > 400)
 
     labels = []
+    profile_labels = []
     rejected = 0
     for reading in readings:
         if reading.get("unreadable") or reading.get("zone") != "map_body":
@@ -65,6 +83,12 @@ def assign_values(
         for item in reading.get("values") or []:
             raw_text = str(item.get("text", "")).strip().replace(",", ".")
             raw_text = raw_text.replace("−", "-").replace("–", "-")
+            integer_match = re.fullmatch(r"-?([0-9]{4,6})", raw_text)
+            if integer_match:
+                integer = int(integer_match.group(1))
+                metre_step = max(1, round(interval * 1000.0))
+                if integer % metre_step != 0:
+                    profile_labels.append((float(center[0]), float(center[1]), integer))
             if not LABEL_PATTERN.match(raw_text):
                 continue
             value = normalized_label(raw_text, interval, snap_tolerance)
@@ -72,6 +96,21 @@ def assign_values(
                 rejected += 1
             else:
                 labels.append((float(center[0]), float(center[1]), value))
+
+    for x, y, _ in profile_labels:
+        candidates = []
+        for index, points in enumerate(polylines):
+            length = float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
+            if length < 140 or straightness(points) >= 0.08:
+                continue
+            candidates.append((float(cKDTree(points).query([x, y])[0]), index))
+        distance, index = min(candidates, default=(float("inf"), -1))
+        if distance <= max_label_distance * 1.25:
+            profile_leaks[index] = True
+
+    band = dominant_value_band([item[2] for item in labels], interval)
+    if band is not None:
+        labels = [item for item in labels if band[0] <= item[2] <= band[1]]
 
     trees = [cKDTree(points) for points in polylines]
     votes: dict[int, list[float]] = {}
@@ -105,6 +144,7 @@ def assign_values(
         "conflicts": conflicts,
         "profile_leaks": profile_leaks,
         "labels": labels,
+        "profile_labels": profile_labels,
         "rejected_labels": rejected,
         "unmatched_labels": unmatched,
     }
@@ -120,9 +160,24 @@ def run(
 ) -> dict:
     payload = json.loads(isolines_path.read_text(encoding="utf-8"))
     polylines = [np.asarray(item, dtype=float) for item in payload["polylines_xy"]]
-    readings = [
-        json.loads(line) for line in readings_path.read_text(encoding="utf-8").splitlines() if line
-    ]
+    raw_readings = readings_path.read_text(encoding="utf-8")
+    try:
+        paddle_payload = json.loads(raw_readings)
+    except json.JSONDecodeError:
+        paddle_payload = None
+    if isinstance(paddle_payload, dict) and isinstance(paddle_payload.get("lines"), list):
+        readings = []
+        for line in paddle_payload["lines"]:
+            readings.append(
+                {
+                    "zone": "map_body",
+                    "quad": line.get("polygon"),
+                    "values": [{"text": line.get("text", "")}],
+                    "unreadable": float(line.get("score") or 0.0) < 0.75,
+                }
+            )
+    else:
+        readings = [json.loads(line) for line in raw_readings.splitlines() if line]
     Image.MAX_IMAGE_PIXELS = None
     image = np.asarray(Image.open(image_path).convert("L"))
     ocr_width, ocr_height = image.shape[1], image.shape[0]
@@ -140,7 +195,10 @@ def run(
                 [float(x) * scale_x, float(y) * scale_y]
                 for x, y in reading.get("quad") or []
             ]
-    result = assign_values(polylines, readings, interval=interval)
+    max_label_distance = max(70.0, min(image.shape) * 0.02)
+    result = assign_values(
+        polylines, readings, interval=interval, max_label_distance=max_label_distance
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
 
     features = []
@@ -157,6 +215,20 @@ def run(
                     "source": "ocr_label" if index in result["values"] else None,
                 },
                 "geometry": {"type": "LineString", "coordinates": points.tolist()},
+            }
+        )
+    for label_index, (x, y, value) in enumerate(result["labels"]):
+        features.append(
+            {
+                "type": "Feature",
+                "properties": {
+                    "id": len(polylines) + label_index,
+                    "kind": "contour_label",
+                    "value_km": value,
+                    "confident": True,
+                    "source": "ocr_label_point",
+                },
+                "geometry": {"type": "Point", "coordinates": [x, y]},
             }
         )
     geojson_path = output_dir / "valued_contours_pixels.geojson"
@@ -197,6 +269,8 @@ def run(
         "polylines": len(polylines),
         "profile_leaks": int(sum(result["profile_leaks"])),
         "ocr_labels": len(result["labels"]),
+        "point_constraints": len(result["labels"]),
+        "profile_id_labels": len(result["profile_labels"]),
         "rejected_labels": result["rejected_labels"],
         "unmatched_labels": result["unmatched_labels"],
         "valued_polylines": len(result["values"]),
@@ -204,6 +278,7 @@ def run(
         "conflicting_polylines": len(result["conflicts"]),
         "direct_value_rate": round(len(result["values"]) / max(1, len(polylines)), 4),
         "contour_interval_km": interval,
+        "max_label_distance_px": round(max_label_distance, 2),
         "ocr_image_size": [ocr_width, ocr_height],
         "trace_image_size": [image.shape[1], image.shape[0]],
         "ocr_to_trace_scale": [round(scale_x, 6), round(scale_y, 6)],

@@ -8,6 +8,7 @@ import numpy as np
 import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import LineString
+from shapely.geometry import Point
 
 from services.map_digitizer.export_cps3_grid import (
     Grid,
@@ -20,6 +21,22 @@ from services.map_digitizer.export_cps3_grid import (
 
 
 class Cps3GridTest(unittest.TestCase):
+    def test_harmonic_grid_accepts_point_and_line_constraints(self):
+        constraints = gpd.GeoDataFrame(
+            [
+                {"value_km": -1.0, "geometry": Point(0, 0)},
+                {"value_km": -1.2, "geometry": LineString([(0, 100), (100, 100)])},
+                {"value_km": -1.4, "geometry": Point(100, 0)},
+            ],
+            geometry="geometry",
+            crs="EPSG:3857",
+        )
+        grid, quality = build_harmonic_grid(
+            constraints, cell_size=25, blanking_distance=200
+        )
+        self.assertGreater(np.isfinite(grid.z).sum(), 0)
+        self.assertTrue(quality["value_range_preserved"])
+
     def test_harmonic_grid_honours_contours_without_overshoot(self):
         contours = gpd.GeoDataFrame(
             {

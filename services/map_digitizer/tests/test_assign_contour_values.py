@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from services.map_digitizer.assign_contour_values import normalized_label, run
+from services.map_digitizer.assign_contour_values import dominant_value_band, normalized_label, run
 
 
 class AssignContourValuesTest(unittest.TestCase):
@@ -15,6 +15,14 @@ class AssignContourValuesTest(unittest.TestCase):
         self.assertEqual(normalized_label("-3,21", 0.2, 0.06), -3.2)
         self.assertIsNone(normalized_label("-3.11", 0.2, 0.06))
         self.assertIsNone(normalized_label("91501", 0.2, 0.06))
+
+    def test_normalizes_metre_labels_and_rejects_profile_number_band(self):
+        self.assertEqual(normalized_label("-1400", 0.1, 0.06), -1.4)
+        values = [-0.8, -1.0, -1.2, -1.4, -1.6, -1.8, -2.0, -7.901, -7.915]
+        low, high = dominant_value_band(values, 0.1)
+        self.assertLess(low, -2.0)
+        self.assertGreater(high, -0.8)
+        self.assertGreater(low, -3.0)
 
     def test_scales_ocr_coordinates_to_trace_image(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -40,10 +40,15 @@ def sample_contours(contours: gpd.GeoDataFrame, spacing: float) -> tuple[np.ndar
     points: list[tuple[float, float]] = []
     values: list[float] = []
     for row in contours.itertuples():
-        geometry: LineString = row.geometry
-        count = max(2, math.ceil(geometry.length / spacing) + 1)
-        for distance in np.linspace(0.0, geometry.length, count):
-            point = geometry.interpolate(float(distance))
+        geometry = row.geometry
+        if geometry.geom_type == "Point":
+            sampled = [geometry]
+        elif geometry.geom_type == "LineString":
+            count = max(2, math.ceil(geometry.length / spacing) + 1)
+            sampled = [geometry.interpolate(float(distance)) for distance in np.linspace(0.0, geometry.length, count)]
+        else:
+            continue
+        for point in sampled:
             points.append((point.x, point.y))
             values.append(float(row.value_km) * 1_000.0)
 
