@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel
 
 
@@ -20,6 +20,9 @@ MAX_BATCH_FILES = int(os.getenv("MAX_BATCH_FILES", "16"))
 DEVICE = os.getenv("OCR_DEVICE", "gpu:0")
 LANGUAGE = os.getenv("OCR_LANGUAGE", "ru")
 MODEL_NAME = os.getenv("OCR_MODEL", "PP-OCRv5")
+AUTOCONTRAST_RETRY = os.getenv("OCR_AUTOCONTRAST_RETRY", "true").lower() not in {"0", "false", "no"}
+RETRY_MIN_LINES = max(0, int(os.getenv("OCR_RETRY_MIN_LINES", "3")))
+RETRY_MIN_CONFIDENCE = float(os.getenv("OCR_RETRY_MIN_CONFIDENCE", "0.93"))
 logger = logging.getLogger("geoarchive.ocr")
 
 
@@ -53,11 +56,14 @@ def _normalize_result(result: Any) -> dict[str, Any]:
     polygons = list(payload.get("rec_polys") or payload.get("dt_polys") or [])
     lines = []
     for index, text in enumerate(texts):
+        text = str(text).strip()
+        if not text:
+            continue
         polygon = polygons[index] if index < len(polygons) else None
         if hasattr(polygon, "tolist"):
             polygon = polygon.tolist()
         score = float(scores[index]) if index < len(scores) else None
-        lines.append({"text": str(text), "score": score, "polygon": polygon})
+        lines.append({"text": text, "score": score, "polygon": polygon})
     return {
         "text": "\n".join(item["text"] for item in lines),
         "lines": lines,
@@ -91,12 +97,24 @@ async def _read_upload(upload: UploadFile) -> bytes:
     return payload
 
 
-def _write_normalized_image(payload: bytes, destination: Any) -> None:
-    """Decode supported raster formats and give Paddle a predictable RGB JPEG."""
+def _write_normalized_image(payload: bytes, destination: Any, *, enhanced: bool = False) -> None:
+    """Decode scans and normalize faded paper before Paddle text detection."""
     with Image.open(io.BytesIO(payload)) as source:
         source.seek(0)
-        image = ImageOps.exif_transpose(source).convert("RGB")
+        image = ImageOps.exif_transpose(source)
+        if enhanced:
+            image = ImageOps.autocontrast(ImageOps.grayscale(image), cutoff=1)
+            image = ImageEnhance.Contrast(image).enhance(1.35)
+            image = image.filter(ImageFilter.UnsharpMask(radius=1.2, percent=130, threshold=3))
+        image = image.convert("RGB")
+        destination.seek(0)
+        destination.truncate()
         image.save(destination, format="JPEG", quality=95, optimize=True)
+
+
+def _mean_confidence(result: dict[str, Any]) -> float:
+    scores = [line["score"] for line in result["lines"] if line.get("score") is not None]
+    return sum(scores) / len(scores) if scores else 0.0
 
 
 async def _ocr_upload(upload: UploadFile) -> dict[str, Any]:
@@ -112,13 +130,24 @@ async def _ocr_upload(upload: UploadFile) -> dict[str, Any]:
             started = time.perf_counter()
             try:
                 result = await asyncio.to_thread(_predict, Path(handle.name))
+                result["preprocessing"] = "original"
+                retry = result["line_count"] < RETRY_MIN_LINES or _mean_confidence(result) < RETRY_MIN_CONFIDENCE
+                if AUTOCONTRAST_RETRY and retry:
+                    _write_normalized_image(payload, handle, enhanced=True)
+                    handle.flush()
+                    enhanced = await asyncio.to_thread(_predict, Path(handle.name))
+                    if _mean_confidence(enhanced) > _mean_confidence(result):
+                        result = enhanced
+                        result["preprocessing"] = "enhanced_retry"
             except Exception as error:
                 state.errors += 1
                 logger.exception("OCR prediction failed for %s", upload.filename)
                 raise HTTPException(500, f"OCR failed: {type(error).__name__}: {error}") from error
             state.requests += 1
             state.pages += 1
-            state.total_latency_s += time.perf_counter() - started
+            elapsed = time.perf_counter() - started
+            state.total_latency_s += elapsed
+            result["latency_s"] = round(elapsed, 3)
             result["filename"] = upload.filename
             return result
 
@@ -141,7 +170,7 @@ async def lifespan(_: FastAPI):
     state.model = None
 
 
-app = FastAPI(title="GeoArchive PaddleOCR", version="1.1.0", lifespan=lifespan)
+app = FastAPI(title="GeoArchive PaddleOCR", version="1.2.0", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -151,6 +180,9 @@ def health() -> dict[str, Any]:
         "model": MODEL_NAME,
         "language": LANGUAGE,
         "device": DEVICE,
+        "autocontrast_retry": AUTOCONTRAST_RETRY,
+        "retry_min_lines": RETRY_MIN_LINES,
+        "retry_min_confidence": RETRY_MIN_CONFIDENCE,
     }
 
 

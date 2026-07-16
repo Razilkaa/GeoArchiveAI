@@ -7,11 +7,23 @@ from pathlib import Path
 
 import fitz
 
-from factory_runner import build_provenance_markdown, prepare_ocr_queue, split_markdown_documents
+from factory_runner import (
+    build_provenance_markdown,
+    normalize_numeric_ocr,
+    prepare_ocr_queue,
+    split_markdown_documents,
+)
 from report_factory import build_manifest, write_manifest
 
 
 class FactoryRunnerTest(unittest.TestCase):
+    def test_numeric_ocr_confusables_are_corrected_conservatively(self):
+        source = "І979-І98О; тО5,9%; Р-4І0; 94-I00; мІ:І00о00; МОГТ"
+        self.assertEqual(
+            normalize_numeric_ocr(source),
+            "1979-1980; 105,9%; Р-410; 94-100; м1:100000; МОГТ",
+        )
+
     def test_ragflow_documents_respect_embedding_window_guard(self):
         with tempfile.TemporaryDirectory() as temp:
             markdown = Path(temp) / "report.md"

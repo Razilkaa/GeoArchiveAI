@@ -10,6 +10,9 @@ services:
       OCR_DEVICE: gpu:0
       OCR_LANGUAGE: ru
       OCR_MODEL: PP-OCRv5
+      OCR_AUTOCONTRAST_RETRY: "true"
+      OCR_RETRY_MIN_LINES: "3"
+      OCR_RETRY_MIN_CONFIDENCE: "0.93"
       OCR_CONCURRENCY: "1"
       MAX_FILE_BYTES: "41943040"
       MAX_BATCH_FILES: "16"

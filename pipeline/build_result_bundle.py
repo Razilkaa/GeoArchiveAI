@@ -83,7 +83,7 @@ def build_bundle(
     if map_result_path and map_result_path.exists():
         map_result = json.loads(map_result_path.read_text(encoding="utf-8"))
         payload["map_digitization"] = {
-            "summary": map_result["summary"],
+            "summary": map_result.get("summary", {}),
             "result_path": str(map_result_path),
             "overlay_path": str(map_result_path.parents[1] / "overlay_v4.png"),
         }

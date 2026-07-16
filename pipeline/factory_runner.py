@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -21,6 +22,16 @@ from PIL import Image
 
 
 urllib3.disable_warnings()
+
+NUMERIC_CONFUSABLE_RE = re.compile(
+    r"(?=[0-9ІIОоOoТт.,:/-]*\d)[0-9ІIОоOoТт]+(?:[.,:/-][0-9ІIОоOoТт]+)*"
+)
+NUMERIC_CONFUSABLES = str.maketrans({"І": "1", "I": "1", "О": "0", "о": "0", "O": "0", "o": "0", "Т": "1", "т": "1"})
+
+
+def normalize_numeric_ocr(text: str) -> str:
+    """Correct glyph confusions only inside tokens that already contain a digit."""
+    return NUMERIC_CONFUSABLE_RE.sub(lambda match: match.group(0).translate(NUMERIC_CONFUSABLES), text)
 
 
 def read_token(path: Path) -> str:
@@ -416,7 +427,11 @@ def build_provenance_markdown(manifest_path: Path) -> Path:
         if not result_path.exists():
             continue
         payload = json.loads(result_path.read_text(encoding="utf-8"))
-        texts = [str(value).strip() for value in payload.get("rec_texts", []) if str(value).strip()]
+        texts = [
+            normalize_numeric_ocr(str(value).strip())
+            for value in payload.get("rec_texts", [])
+            if str(value).strip()
+        ]
         marker = f"[SOURCE_PAGE: {item['page_id']}; path={item['source_path']}]"
         marked_texts = [f"{marker} {line}" for line in texts]
         for part_index, text_part in enumerate(_split_ocr_lines(marked_texts), 1):
