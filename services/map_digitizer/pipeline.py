@@ -22,7 +22,8 @@ from services.map_digitizer.trace_guided_surface import run as reconstruct_trace
 from services.map_digitizer.trace_map_isolines import trace
 
 Image.MAX_IMAGE_PIXELS = None
-PIPELINE_VERSION = 2
+PIPELINE_VERSION = 3
+MIN_DENSE_PROFILE_MEASUREMENTS = 80
 
 
 def file_sha256(path: Path) -> str:
@@ -140,16 +141,27 @@ def quality_decision(assignment: dict, reconstruction: dict) -> dict:
 def select_reconstruction_mode(assignment: dict) -> str:
     return (
         "dense_profile_measurements"
-        if int(assignment.get("profile_measurements", 0)) >= 20
+        if int(assignment.get("profile_measurements", 0)) >= MIN_DENSE_PROFILE_MEASUREMENTS
         else "sparse_labels_trace_guided"
     )
 
 
 def insufficient_reconstruction_support(error: ValueError) -> bool:
     message = str(error)
-    return message.startswith("Only ") and "traced contours passed QC" in message or (
+    return message.startswith("Only ") and any(
+        phrase in message
+        for phrase in (
+            "traced contours passed QC",
+            "trusted contours; at least 3 required",
+            "valid depth constraints; at least 5 are required",
+        )
+    ) or (
         "need at least one array to concatenate" in message
     )
+
+
+def insufficient_assignment_support(error: ValueError) -> bool:
+    return str(error) == "Cannot infer contour interval from fewer than three labels"
 
 
 def reconstruct_adaptive(
@@ -263,16 +275,35 @@ def run_pipeline(
     result["stages"]["trace"]["metrics"] = trace_metrics
 
     assignment_dir = output_dir / "assignment"
-    assignment = execute(
-        "assignment",
-        lambda: assign_values(
-            trace_dir / "isolines.json",
-            ocr_path,
-            image_path,
-            assignment_dir,
-            interval=interval,
-        ),
-    )
+    try:
+        assignment = execute(
+            "assignment",
+            lambda: assign_values(
+                trace_dir / "isolines.json",
+                ocr_path,
+                image_path,
+                assignment_dir,
+                interval=interval,
+            ),
+        )
+    except ValueError as error:
+        if not insufficient_assignment_support(error):
+            raise
+        result.pop("failed_stage", None)
+        result.pop("error", None)
+        result["stages"]["assignment"]["status"] = "not_applicable"
+        result["status"] = "not_applicable"
+        result["quality"] = {
+            "status": "not_applicable",
+            "reasons": ["insufficient_contour_interval_support"],
+        }
+        result["total_latency_s"] = round(
+            sum(float(stage["latency_s"]) for stage in result["stages"].values()), 3
+        )
+        result_path.write_text(
+            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        return result
     result["stages"]["assignment"]["metrics"] = assignment
     if (
         int(assignment.get("confident_polylines", 0)) == 0

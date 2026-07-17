@@ -6,6 +6,7 @@ from services.map_digitizer.pipeline import (
     assess_ocr_eligibility,
     quality_decision,
     select_reconstruction_mode,
+    insufficient_assignment_support,
     insufficient_reconstruction_support,
 )
 
@@ -41,11 +42,11 @@ class PipelineQualityTest(unittest.TestCase):
 
     def test_selects_reconstruction_mode_from_profile_measurement_density(self):
         self.assertEqual(
-            select_reconstruction_mode({"profile_measurements": 20}),
+            select_reconstruction_mode({"profile_measurements": 80}),
             "dense_profile_measurements",
         )
         self.assertEqual(
-            select_reconstruction_mode({"profile_measurements": 0}),
+            select_reconstruction_mode({"profile_measurements": 79}),
             "sparse_labels_trace_guided",
         )
 
@@ -195,6 +196,23 @@ class PipelineQualityTest(unittest.TestCase):
             )
         )
         self.assertFalse(insufficient_reconstruction_support(ValueError("broken grid shape")))
+
+    def test_recognizes_all_expected_insufficient_support_failures(self):
+        self.assertTrue(
+            insufficient_assignment_support(
+                ValueError("Cannot infer contour interval from fewer than three labels")
+            )
+        )
+        self.assertTrue(
+            insufficient_reconstruction_support(
+                ValueError("Only 2 trusted contours; at least 3 required")
+            )
+        )
+        self.assertTrue(
+            insufficient_reconstruction_support(
+                ValueError("Only 3 valid depth constraints; at least 5 are required")
+            )
+        )
 
 
 if __name__ == "__main__":
