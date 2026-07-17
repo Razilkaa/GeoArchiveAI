@@ -50,6 +50,7 @@ def summarize_results(results: list[dict]) -> dict:
         cases.append(
             {
                 "source": payload.get("source"),
+                "source_sha256": payload.get("source_sha256"),
                 "pipeline_version": payload.get("version"),
                 "status": payload.get("status"),
                 "latency_s": payload.get("total_latency_s"),
@@ -103,6 +104,38 @@ def summarize_results(results: list[dict]) -> dict:
     }
 
 
+def evaluate_expectations(summary: dict, expectations: list[dict]) -> dict:
+    by_hash = {
+        case.get("source_sha256"): case
+        for case in summary.get("cases", [])
+        if case.get("source_sha256")
+    }
+    checks = []
+    for expected in expectations:
+        case = by_hash.get(expected.get("source_sha256"))
+        allowed = expected.get("allowed_statuses") or [expected.get("status")]
+        passed = case is not None and case.get("status") in allowed
+        if passed and expected.get("max_crossings") is not None:
+            passed = case.get("crossings") is not None and int(case["crossings"]) <= int(
+                expected["max_crossings"]
+            )
+        checks.append(
+            {
+                "name": expected.get("name"),
+                "passed": passed,
+                "expected_statuses": allowed,
+                "actual_status": case.get("status") if case else None,
+                "actual_crossings": case.get("crossings") if case else None,
+            }
+        )
+    return {
+        "count": len(checks),
+        "passed": sum(check["passed"] for check in checks),
+        "failed": sum(not check["passed"] for check in checks),
+        "checks": checks,
+    }
+
+
 def render_markdown(summary: dict) -> str:
     latency = summary["latency_s"]
     lines = [
@@ -140,6 +173,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Summarize map pipeline_result.json files")
     parser.add_argument("results", type=Path, nargs="+")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--expectations", type=Path)
     args = parser.parse_args()
     paths = []
     for candidate in args.results:
@@ -149,6 +183,9 @@ def main() -> None:
             paths.append(candidate)
     payloads = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(set(paths))]
     summary = summarize_results(payloads)
+    if args.expectations:
+        expectations = json.loads(args.expectations.read_text(encoding="utf-8"))
+        summary["expectations"] = evaluate_expectations(summary, expectations)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     args.output.with_suffix(".md").write_text(render_markdown(summary), encoding="utf-8")

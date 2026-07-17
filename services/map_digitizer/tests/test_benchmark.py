@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import unittest
 
-from services.map_digitizer.benchmark import render_markdown, summarize_results
+from services.map_digitizer.benchmark import (
+    evaluate_expectations,
+    render_markdown,
+    summarize_results,
+)
 
 
 class BenchmarkTest(unittest.TestCase):
@@ -63,6 +67,36 @@ class BenchmarkTest(unittest.TestCase):
         self.assertEqual(summary["case_count"], 1)
         self.assertEqual(summary["duplicate_manifests"], 1)
         self.assertEqual(summary["cases"][0]["status"], "review")
+
+    def test_evaluates_status_and_crossing_expectations_by_hash(self):
+        summary = {
+            "cases": [
+                {
+                    "source_sha256": "abc",
+                    "status": "review",
+                    "crossings": 0,
+                }
+            ]
+        }
+        result = evaluate_expectations(
+            summary,
+            [
+                {
+                    "name": "sparse map",
+                    "source_sha256": "abc",
+                    "status": "review",
+                    "max_crossings": 0,
+                },
+                {
+                    "name": "missing map",
+                    "source_sha256": "missing",
+                    "status": "accepted",
+                },
+            ],
+        )
+
+        self.assertEqual(result["passed"], 1)
+        self.assertEqual(result["failed"], 1)
 
 
 if __name__ == "__main__":

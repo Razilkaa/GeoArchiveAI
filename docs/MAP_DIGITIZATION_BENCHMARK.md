@@ -32,9 +32,12 @@ and residual checks.
 
 ```powershell
 python -m services.map_digitizer.benchmark runs `
+  --expectations benchmarks/maps/acceptance_v3.json `
   --output runs/map_validation/final_all_runs_benchmark.json
 ```
 
 The JSON contains per-sheet reasons, pipeline versions, reconstruction mode,
 constraint P95, contour levels, closures, crossings and latency. Generated run
-artifacts are intentionally not committed.
+artifacts are intentionally not committed. The tracked five-case acceptance
+regression currently passes 5/5 and protects the dense accept, sparse review,
+non-map rejection and multi-horizon review policies.
