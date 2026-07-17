@@ -141,12 +141,15 @@ def run_report_maps(
         existing_result = json.loads(existing_result_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         existing_result = {}
+    if not map_pages(manifest) and existing_result.get("artifacts"):
+        return existing_result
     output_root.mkdir(parents=True, exist_ok=True)
     jobs_root_resolved = jobs_root.resolve()
     preserved_artifacts = []
     generated_names = {
         "source_map", "surface_preview", "surface_clean_preview", "pixel_grid",
-        "pixel_contours", "local_cps3", "local_xyz", "local_export_metadata",
+        "pixel_contours", "interpolated_contours", "local_cps3", "local_xyz",
+        "local_export_metadata",
     }
     for item in existing_result.get("artifacts", []):
         if (
@@ -272,6 +275,7 @@ def run_report_maps(
                     ("surface_clean_preview", "Чистая оцифрованная карта", "image/png"),
                     ("pixel_grid", "Grid в пиксельной системе", "application/octet-stream"),
                     ("pixel_contours", "Оцифрованные изолинии", "application/geo+json"),
+                    ("interpolated_contours", "Финальные изолинии", "application/geo+json"),
                     ("local_cps3", "CPS-3 Grid (локальная система листа)", "text/plain"),
                     ("local_xyz", "XYZ (локальная система листа)", "text/plain"),
                     ("local_export_metadata", "Метаданные локального Grid", "application/json"),

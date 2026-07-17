@@ -350,6 +350,7 @@ def trace(
         "manifest": str(manifest) if manifest else None,
         "scale": scale,
         "profile_segments_removed": profile_segments,
+        "ocr_boxes_considered": len(scaled_boxes),
         "survey_profiles": survey_profiles,
         "isoline_components": kept_components,
         "vector_polylines": len(polylines),

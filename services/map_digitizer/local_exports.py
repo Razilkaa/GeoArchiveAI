@@ -7,7 +7,6 @@ from pathlib import Path
 import geopandas as gpd
 import matplotlib
 import numpy as np
-from PIL import Image
 from pyproj import CRS
 
 from services.map_digitizer.export_cps3_grid import Grid, write_cps3, write_xyz
@@ -80,27 +79,6 @@ def materialize_local_exports(
             )
         if len(unvalued):
             unvalued.plot(ax=axis, color="#555555", linewidth=0.55, alpha=0.75)
-    if source_mask_path and source_mask_path.is_file():
-        with Image.open(source_mask_path) as source_mask:
-            mask = np.asarray(source_mask.convert("L"))
-        masked_lines = np.ma.masked_where(mask == 0, mask)
-        x_step = float(np.median(np.diff(grid.x))) if len(grid.x) > 1 else 1.0
-        y_step = float(np.median(np.diff(grid.y))) if len(grid.y) > 1 else 1.0
-        axis.imshow(
-            masked_lines,
-            cmap="gray_r",
-            vmin=0,
-            vmax=255,
-            interpolation="nearest",
-            extent=(
-                float(grid.x[0]),
-                float(grid.x[-1] + x_step),
-                float(grid.y[-1] + y_step),
-                float(grid.y[0]),
-            ),
-            alpha=0.92,
-            zorder=5,
-        )
     axis.set_ylim(float(grid.y[-1]), float(grid.y[0]))
     axis.set_aspect("equal")
     axis.set_title("Source-preserving digitized map | local pixel coordinates | REVIEW")
@@ -119,6 +97,7 @@ def materialize_local_exports(
                 "warning": "Assign control points before loading this grid into a spatial project.",
                 "contour_geometry": "traced_from_source_raster",
                 "source_mask": str(source_mask_path) if source_mask_path else None,
+                "preview_geometry": "filtered_vector_contours",
                 "grid_role": "interpolation_between_traced_contours",
                 "files": {
                     "cps3": str(cps3_path),

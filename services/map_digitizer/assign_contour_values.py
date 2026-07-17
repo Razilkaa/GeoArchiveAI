@@ -93,10 +93,21 @@ def infer_contour_interval(readings: list[dict]) -> tuple[float, dict]:
         )
         scores.append({"interval_km": candidate, "support": round(support, 4)})
     minimum_support = 0.7
-    selected = next(
-        (item["interval_km"] for item in scores if item["support"] >= minimum_support),
-        max(scores, key=lambda item: item["support"])["interval_km"],
-    )
+    # Steps below 50 m are usually mathematical divisors of noisy OCR values,
+    # not the drafting interval of an archival regional structural map. If no
+    # standard step reaches the absolute support threshold, prefer the largest
+    # one close to the best plausible score instead of the trivial 10 m fit.
+    plausible = [item for item in scores if item["interval_km"] >= 0.05]
+    supported = [item for item in plausible if item["support"] >= minimum_support]
+    if supported:
+        selected = supported[0]["interval_km"]
+    else:
+        best_support = max(item["support"] for item in plausible)
+        selected = next(
+            item["interval_km"]
+            for item in plausible
+            if item["support"] >= best_support - 0.12
+        )
     selected_support = next(
         item["support"] for item in scores if item["interval_km"] == selected
     )

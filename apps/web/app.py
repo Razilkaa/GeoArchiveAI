@@ -446,14 +446,14 @@ with materials_tab:
         downloads = [
             item
             for item in page_artifacts
-            if item.get("name") in {"pixel_contours", "local_cps3"}
+            if item.get("name") in {"interpolated_contours", "local_cps3"}
         ]
         download_columns = st.columns(max(1, len(downloads)))
         for index, (column, artifact) in enumerate(zip(download_columns, downloads)):
             path = resolve_artifact_path(str(artifact.get("path") or ""))
             if path.is_file():
                 column.download_button(
-                    "Скачать GeoJSON" if artifact.get("name") == "pixel_contours" else "Скачать CPS-3",
+                    "Скачать GeoJSON" if artifact.get("name") == "interpolated_contours" else "Скачать CPS-3",
                     data=path.read_bytes(),
                     file_name=path.name,
                     mime=str(artifact.get("media_type") or "application/octet-stream"),

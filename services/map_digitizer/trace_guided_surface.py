@@ -192,7 +192,7 @@ def run(
     # not make the remaining source linework disappear from user exports.
     preserved_rows = []
     for item in assignments:
-        if item["profile_suspect"]:
+        if item["profile_suspect"] or item["length_px"] < minimum_trace_length * 0.5:
             continue
         value_km = item.get("value_km")
         if value_km is None:
