@@ -36,6 +36,13 @@ def read_json(path: Path, default: Any = None) -> Any:
         return default
 
 
+def resolved_artifact_path(raw_path: Any) -> Path:
+    path = Path(str(raw_path or ""))
+    if not path.is_absolute():
+        path = settings.project_root / path
+    return path.resolve()
+
+
 def report_run_dir(report_id: str) -> Path:
     if report_id in {".", ".."} or Path(report_id).name != report_id:
         raise HTTPException(400, "invalid_report_id")
@@ -92,7 +99,7 @@ def artifact_payload(report_id: str) -> list[dict[str, Any]]:
     artifacts = []
     for name, record in operator.get("agents", {}).items():
         for artifact in record.get("result", {}).get("artifacts", []):
-            path = Path(str(artifact.get("path") or ""))
+            path = resolved_artifact_path(artifact.get("path"))
             artifacts.append(
                 {
                     "agent": name,
@@ -155,7 +162,7 @@ def map_payload(report_id: str) -> dict[str, Any]:
                 "duplicate",
             }:
                 continue
-            path = Path(str(artifact.get("path") or ""))
+            path = resolved_artifact_path(artifact.get("path"))
             if path.exists() and not any(item["path"] == str(path) for item in sources):
                 sources.insert(
                     0,
@@ -169,7 +176,7 @@ def map_payload(report_id: str) -> dict[str, Any]:
                     }
                 )
             continue
-        path = Path(str(artifact.get("path") or ""))
+        path = resolved_artifact_path(artifact.get("path"))
         digitized.append(
             {
                 **artifact,
@@ -198,7 +205,8 @@ def map_payload(report_id: str) -> dict[str, Any]:
 def report_map_artifact(report_id: str, artifact_id: str) -> tuple[Path, str]:
     directory = report_run_dir(report_id).resolve()
     manifest = read_json(directory / "job.json", {})
-    source_root = Path(str(manifest.get("source_root") or "")).resolve()
+    source_root_value = manifest.get("source_root")
+    source_root = Path(str(source_root_value)).resolve() if source_root_value else None
     payload = map_payload(report_id)
     records = [*payload["sources"], *payload["digitized"]]
     record = next(
@@ -206,12 +214,10 @@ def report_map_artifact(report_id: str, artifact_id: str) -> tuple[Path, str]:
     )
     if record is None:
         raise HTTPException(404, "report_map_artifact_not_found")
-    path = Path(str(record.get("path") or ""))
-    if not path.is_absolute():
-        path = settings.project_root / path
-    path = path.resolve()
+    path = resolved_artifact_path(record.get("path"))
     if not path.is_file() or not (
-        path.is_relative_to(directory) or path.is_relative_to(source_root)
+        path.is_relative_to(directory)
+        or (source_root is not None and path.is_relative_to(source_root))
     ):
         raise HTTPException(404, "report_map_artifact_not_found")
     media_type = str(

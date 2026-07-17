@@ -273,6 +273,33 @@ class ApiTest(unittest.TestCase):
 
         self.assertEqual(payload["sources"], [])
 
+    def test_maps_endpoint_resolves_project_relative_artifact(self):
+        directory = self.runs / "375392"
+        preview = directory / "relative-preview.png"
+        preview.write_bytes(b"preview")
+        map_agent = directory / "map_agent"
+        map_agent.mkdir()
+        relative = preview.relative_to(self.runs.parent)
+        (map_agent / "result.json").write_text(
+            json.dumps(
+                {
+                    "artifacts": [
+                        {"name": "surface_preview", "path": str(relative)}
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        with patch.object(
+            report_service,
+            "settings",
+            SimpleNamespace(runs_root=self.runs, project_root=self.runs.parent),
+        ):
+            payload = self.client.get("/api/reports/375392/maps").json()
+
+        self.assertTrue(payload["digitized"][0]["exists"])
+        self.assertEqual(payload["digitized"][0]["size_bytes"], 7)
+
     @patch("app.routers.reports.reconcile_now")
     def test_scan_registers_and_starts_reports(self, reconcile):
         reconcile.return_value = {
