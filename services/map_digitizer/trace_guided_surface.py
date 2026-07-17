@@ -57,7 +57,8 @@ def assign_traced_values(
             (curvature < 0.01 and length > 100.0)
             or (curvature < 0.035 and length > 400.0)
         )
-        if np.sum(valid) >= 5:
+        valid_count = int(np.sum(valid))
+        if valid_count >= 2:
             values = np.abs(predictions[valid])
             median = float(np.median(values))
             snapped = round(median / interval) * interval
@@ -69,6 +70,7 @@ def assign_traced_values(
             not profile_suspect
             and length >= minimum_length
             and coverage >= minimum_coverage
+            and valid_count >= 5
             and residual is not None
             and residual <= maximum_residual
             and spread <= maximum_spread
@@ -81,6 +83,9 @@ def assign_traced_values(
                 "coverage": round(coverage, 4),
                 "length_px": round(length, 2),
                 "value_km": -round(float(snapped), 3) if accepted else None,
+                "inferred_value_km": (
+                    -round(float(snapped), 3) if snapped is not None else None
+                ),
                 "spread_km": round(float(spread), 4) if spread is not None else None,
                 "residual_km": round(float(residual), 4) if residual is not None else None,
                 "geometry": LineString(points),
@@ -172,6 +177,7 @@ def run(
     for item in assignments:
         if item["id"] in direct_labels and not item["profile_suspect"]:
             item["value_km"] = direct_labels[item["id"]]
+            item["inferred_value_km"] = direct_labels[item["id"]]
             item["accepted"] = True
             item["direct_label"] = True
         else:
@@ -180,6 +186,36 @@ def run(
     accepted = [item for item in assignments if item["accepted"]]
     if len(accepted) < 3:
         raise ValueError(f"Only {len(accepted)} traced contours passed QC")
+
+    # The traced geometry is the digitization result.  Grid acceptance is a
+    # stricter decision used only to choose interpolation constraints; it must
+    # not make the remaining source linework disappear from user exports.
+    preserved_rows = []
+    for item in assignments:
+        if item["profile_suspect"]:
+            continue
+        value_km = item.get("value_km")
+        if value_km is None:
+            value_km = item.get("inferred_value_km")
+        preserved_rows.append(
+            {
+                "trace_id": item["id"],
+                "value_km": value_km,
+                "value_m": value_km * 1000.0 if value_km is not None else None,
+                "value_source": (
+                    "direct_ocr"
+                    if item.get("direct_label")
+                    else "surface_interpolation"
+                    if value_km is not None
+                    else "unassigned"
+                ),
+                "accepted_for_grid": bool(item["accepted"]),
+                "coverage": item["coverage"],
+                "spread_km": item["spread_km"],
+                "residual_km": item["residual_km"],
+                "geometry": item["geometry"],
+            }
+        )
 
     source_rows = [
         {
@@ -223,6 +259,11 @@ def run(
     output_dir.mkdir(parents=True, exist_ok=True)
     source_geojson = output_dir / "source_aligned_contours_pixels.geojson"
     contours.to_file(source_geojson, driver="GeoJSON")
+    preserved = gpd.GeoDataFrame(
+        preserved_rows, geometry="geometry", crs="EPSG:3857"
+    )
+    preserved_geojson = output_dir / "digitized_source_contours_pixels.geojson"
+    preserved.to_file(preserved_geojson, driver="GeoJSON")
     final_geojson = output_dir / "reconstructed_contours_pixels.geojson"
     reconstructed.to_file(final_geojson, driver="GeoJSON")
     grid_path = output_dir / "trace_guided_surface_pixels.npz"
@@ -261,6 +302,8 @@ def run(
         "accepted_traces": len(accepted),
         "accepted_rate": round(len(accepted) / max(1, len(assignments)), 4),
         "profile_suspects": sum(item["profile_suspect"] for item in assignments),
+        "preserved_source_traces": len(preserved),
+        "preserved_valued_traces": int(preserved["value_m"].notna().sum()),
         "minimum_trace_length_px": round(minimum_trace_length, 2),
         "direct_labels": len(direct_labels),
         "crossing_rejections": crossing_rejections,
@@ -276,6 +319,7 @@ def run(
         "contour_cleanup": contour_cleanup,
         "files": {
             "source_contours": str(source_geojson),
+            "digitized_contours": str(preserved_geojson),
             "final_contours": str(final_geojson),
             "grid": str(grid_path),
             "preview": str(preview),

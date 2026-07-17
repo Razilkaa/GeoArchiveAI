@@ -21,6 +21,7 @@ class TraceGuidedSurfaceTest(unittest.TestCase):
 
         self.assertFalse(assignments[0]["accepted"])
         self.assertLess(assignments[0]["length_px"], 100.0)
+        self.assertEqual(assignments[0]["inferred_value_km"], -2.0)
 
 
 if __name__ == "__main__":

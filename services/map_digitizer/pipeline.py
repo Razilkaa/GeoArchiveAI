@@ -165,6 +165,12 @@ def insufficient_assignment_support(error: ValueError) -> bool:
     return str(error) == "Cannot infer contour interval from fewer than three labels"
 
 
+def digitized_contours_path(reconstruction: dict) -> str:
+    """Prefer source-map geometry; reconstructed contours are grid diagnostics."""
+    files = reconstruction["files"]
+    return files.get("digitized_contours") or files["final_contours"]
+
+
 def reconstruct_adaptive(
     assignment: dict,
     assignment_path: Path,
@@ -350,10 +356,12 @@ def run_pipeline(
         result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         return result
     result["stages"]["reconstruction"]["metrics"] = reconstruction
+    display_contours = digitized_contours_path(reconstruction)
     local_exports = materialize_local_exports(
         reconstruction["files"]["grid"],
-        reconstruction["files"]["final_contours"],
+        display_contours,
         reconstruction_dir,
+        source_mask_path=trace_metrics["isoline_mask"],
     )
     result["quality"] = quality_decision(assignment, reconstruction)
     result["status"] = result["quality"]["status"]
@@ -366,7 +374,8 @@ def run_pipeline(
             "assignment_preview": assignment["files"]["preview"],
             "surface_preview": reconstruction["files"]["preview"],
             "pixel_grid": reconstruction["files"]["grid"],
-            "pixel_contours": reconstruction["files"]["final_contours"],
+            "pixel_contours": display_contours,
+            "interpolated_contours": reconstruction["files"]["final_contours"],
             **local_exports,
         }
     )

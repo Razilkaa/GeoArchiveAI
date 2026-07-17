@@ -4,6 +4,7 @@ import unittest
 
 from services.map_digitizer.pipeline import (
     assess_ocr_eligibility,
+    digitized_contours_path,
     quality_decision,
     select_reconstruction_mode,
     insufficient_assignment_support,
@@ -12,6 +13,23 @@ from services.map_digitizer.pipeline import (
 
 
 class PipelineQualityTest(unittest.TestCase):
+    def test_prefers_source_geometry_for_digitized_contour_export(self):
+        self.assertEqual(
+            digitized_contours_path(
+                {
+                    "files": {
+                        "digitized_contours": "source.geojson",
+                        "final_contours": "synthetic.geojson",
+                    }
+                }
+            ),
+            "source.geojson",
+        )
+        self.assertEqual(
+            digitized_contours_path({"files": {"final_contours": "fallback.geojson"}}),
+            "fallback.geojson",
+        )
+
     def test_ocr_eligibility_requires_repeated_depth_levels(self):
         eligible = assess_ocr_eligibility(
             {

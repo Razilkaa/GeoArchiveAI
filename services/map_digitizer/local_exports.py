@@ -7,22 +7,26 @@ from pathlib import Path
 import geopandas as gpd
 import matplotlib
 import numpy as np
+from PIL import Image
 from pyproj import CRS
 
 from services.map_digitizer.export_cps3_grid import Grid, write_cps3, write_xyz
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
 
 
 def materialize_local_exports(
     grid_path: str | Path,
     contours_path: str | Path,
     output_dir: str | Path,
+    source_mask_path: str | Path | None = None,
 ) -> dict[str, str]:
     """Create clean preview and exchange files in raster-pixel coordinates."""
     grid_path = Path(grid_path)
     contours_path = Path(contours_path)
+    source_mask_path = Path(source_mask_path) if source_mask_path else None
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -54,12 +58,52 @@ def materialize_local_exports(
         np.ma.masked_invalid(grid.z),
         shading="auto",
         cmap="viridis_r",
+        alpha=0.42,
     )
     if len(contours):
-        contours.plot(ax=axis, color="#161616", linewidth=0.7)
-    axis.invert_yaxis()
+        # Keep the raster-derived linework legible regardless of whether a
+        # trustworthy value could be assigned to every fragment.
+        contours.plot(ax=axis, color="#202020", linewidth=0.7, alpha=0.9)
+        valued = contours[contours.get("value_m").notna()] if "value_m" in contours else contours
+        unvalued = contours[contours.get("value_m").isna()] if "value_m" in contours else contours.iloc[0:0]
+        if len(valued):
+            finite_grid = grid.z[np.isfinite(grid.z)]
+            norm = Normalize(
+                vmin=float(np.min(finite_grid)), vmax=float(np.max(finite_grid))
+            )
+            valued.plot(
+                ax=axis,
+                column="value_m",
+                cmap="viridis_r",
+                norm=norm,
+                linewidth=1.15,
+            )
+        if len(unvalued):
+            unvalued.plot(ax=axis, color="#555555", linewidth=0.55, alpha=0.75)
+    if source_mask_path and source_mask_path.is_file():
+        with Image.open(source_mask_path) as source_mask:
+            mask = np.asarray(source_mask.convert("L"))
+        masked_lines = np.ma.masked_where(mask == 0, mask)
+        x_step = float(np.median(np.diff(grid.x))) if len(grid.x) > 1 else 1.0
+        y_step = float(np.median(np.diff(grid.y))) if len(grid.y) > 1 else 1.0
+        axis.imshow(
+            masked_lines,
+            cmap="gray_r",
+            vmin=0,
+            vmax=255,
+            interpolation="nearest",
+            extent=(
+                float(grid.x[0]),
+                float(grid.x[-1] + x_step),
+                float(grid.y[-1] + y_step),
+                float(grid.y[0]),
+            ),
+            alpha=0.92,
+            zorder=5,
+        )
+    axis.set_ylim(float(grid.y[-1]), float(grid.y[0]))
     axis.set_aspect("equal")
-    axis.set_title("Digitized surface | local pixel coordinates | REVIEW")
+    axis.set_title("Source-preserving digitized map | local pixel coordinates | REVIEW")
     axis.set_xlabel("Raster X, px")
     axis.set_ylabel("Raster Y, px")
     fig.colorbar(fill, ax=axis, shrink=0.8, label="Depth/elevation, m")
@@ -73,6 +117,9 @@ def materialize_local_exports(
                 "coordinate_system": "local_pixel_coordinates",
                 "georeferenced": False,
                 "warning": "Assign control points before loading this grid into a spatial project.",
+                "contour_geometry": "traced_from_source_raster",
+                "source_mask": str(source_mask_path) if source_mask_path else None,
+                "grid_role": "interpolation_between_traced_contours",
                 "files": {
                     "cps3": str(cps3_path),
                     "xyz": str(xyz_path),
