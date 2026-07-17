@@ -17,6 +17,15 @@ from app.config import settings
 ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
 MAX_UPLOAD_BYTES = 250 * 1024 * 1024
 JOB_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
+PIPELINE_ARTIFACTS = {
+    "ocr",
+    "trace_preview",
+    "assignment_preview",
+    "surface_preview",
+    "pixel_grid",
+    "pixel_contours",
+}
+GEOREFERENCE_ARTIFACTS = {"cps3", "xyz", "prj", "georeference_metadata"}
 
 
 def map_jobs_root() -> Path:
@@ -120,6 +129,42 @@ def map_job_status(job_id: str) -> dict:
         except OSError:
             return {**job, "status": "failed", "error": "worker_exited_without_manifest"}
     return job
+
+
+def map_job_artifact(job_id: str, artifact_name: str) -> Path:
+    directory = map_job_dir(job_id).resolve()
+    candidate: Path | None = None
+    if artifact_name in PIPELINE_ARTIFACTS:
+        result = read_json(directory / "pipeline_result.json") or {}
+        raw_path = result.get("artifacts", {}).get(artifact_name)
+        if raw_path:
+            candidate = Path(raw_path)
+    elif artifact_name in GEOREFERENCE_ARTIFACTS:
+        manifests = sorted(
+            (directory / "georeferenced").glob("*.json"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        if manifests:
+            metadata_path = manifests[0]
+            if artifact_name == "georeference_metadata":
+                candidate = metadata_path
+            else:
+                metadata = read_json(metadata_path) or {}
+                raw_path = metadata.get("files", {}).get(artifact_name)
+                if raw_path:
+                    candidate = Path(raw_path)
+    else:
+        raise HTTPException(404, "map_artifact_not_found")
+
+    if candidate is None:
+        raise HTTPException(409, "map_artifact_not_ready")
+    if not candidate.is_absolute():
+        candidate = directory / candidate
+    candidate = candidate.resolve()
+    if not candidate.is_relative_to(directory) or not candidate.is_file():
+        raise HTTPException(404, "map_artifact_not_found")
+    return candidate
 
 
 def georeference_map_job(

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, File, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
 
 from app.schemas import MapGeoreferenceRequest
 from app.services.map_jobs import (
     georeference_map_job as run_georeference,
+    map_job_artifact,
     map_job_status,
     start_map_job,
 )
@@ -32,6 +34,21 @@ async def create_map_job(
 @router.get("/jobs/{job_id}")
 def get_map_job(job_id: str) -> dict:
     return map_job_status(job_id)
+
+
+@router.get("/jobs/{job_id}/artifacts/{artifact_name}")
+def download_map_artifact(job_id: str, artifact_name: str) -> FileResponse:
+    path = map_job_artifact(job_id, artifact_name)
+    media_types = {
+        ".png": "image/png",
+        ".geojson": "application/geo+json",
+        ".json": "application/json",
+        ".cps3": "text/plain",
+        ".xyz": "text/plain",
+        ".prj": "text/plain",
+        ".npz": "application/octet-stream",
+    }
+    return FileResponse(path, media_type=media_types.get(path.suffix.lower()))
 
 
 @router.post("/jobs/{job_id}/georeference")

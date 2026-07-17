@@ -16,6 +16,7 @@ ALLOWED_FORCE_STAGES = {
     "fast_ocr",
     "markdown",
     "ragflow",
+    "map_digitization",
     "agents",
     "bundle",
     "operator",

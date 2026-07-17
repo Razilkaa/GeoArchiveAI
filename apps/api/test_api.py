@@ -58,6 +58,19 @@ class ApiTest(unittest.TestCase):
         self.assertIn("/api/maps/jobs", paths)
         self.assertIn("/api/maps/jobs/{job_id}", paths)
         self.assertIn("/api/maps/jobs/{job_id}/georeference", paths)
+        self.assertIn("/api/maps/jobs/{job_id}/artifacts/{artifact_name}", paths)
+        self.assertIn("/api/reports/{report_id}/maps/run", paths)
+
+    @patch.object(report_router, "start_report")
+    def test_report_map_rerun_forces_map_stage_and_bundle(self, start_report):
+        start_report.return_value = {"report_id": "375392", "status": "accepted"}
+
+        response = self.client.post("/api/reports/375392/maps/run")
+
+        self.assertEqual(response.status_code, 202)
+        start_report.assert_called_once_with(
+            "375392", ["map_digitization", "bundle"]
+        )
 
     @patch.object(report_router, "corpus_search_service")
     def test_corpus_search_endpoint(self, service_factory):

@@ -112,6 +112,11 @@ def report_maps(report_id: str) -> dict[str, Any]:
     return map_payload(report_id)
 
 
+@router.post("/reports/{report_id}/maps/run", status_code=202)
+def run_report_maps(report_id: str) -> dict[str, Any]:
+    return start_report(report_id, ["map_digitization", "bundle"])
+
+
 @router.post("/reports/{report_id}/run", status_code=202)
 def run_report(report_id: str, request: RunRequest) -> dict[str, Any]:
     return start_report(report_id, request.force)

@@ -75,6 +75,41 @@ class MapJobsApiTest(unittest.TestCase):
         self.assertEqual(response.json()["status"], "accepted")
         self.assertEqual(response.json()["result"]["quality"]["crossings"], 0)
 
+    def test_download_returns_pipeline_artifact(self):
+        job_id = "d" * 32
+        directory = self.settings.runs_root / "map_jobs" / job_id
+        directory.mkdir(parents=True)
+        preview = directory / "surface.png"
+        preview.write_bytes(b"png-result")
+        (directory / "pipeline_result.json").write_text(
+            json.dumps({"artifacts": {"surface_preview": str(preview)}}),
+            encoding="utf-8",
+        )
+
+        response = self.client.get(
+            f"/api/maps/jobs/{job_id}/artifacts/surface_preview"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"png-result")
+        self.assertEqual(response.headers["content-type"], "image/png")
+
+    def test_download_rejects_artifact_outside_job(self):
+        job_id = "e" * 32
+        directory = self.settings.runs_root / "map_jobs" / job_id
+        directory.mkdir(parents=True)
+        outside = self.root / "private.npz"
+        outside.write_bytes(b"private")
+        (directory / "pipeline_result.json").write_text(
+            json.dumps({"artifacts": {"pixel_grid": str(outside)}}),
+            encoding="utf-8",
+        )
+
+        response = self.client.get(f"/api/maps/jobs/{job_id}/artifacts/pixel_grid")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "map_artifact_not_found")
+
     @patch("app.routers.maps.run_georeference")
     def test_georeference_passes_validated_controls(self, georeference):
         georeference.return_value = {"status": "accepted", "target_crs": "EPSG:28421"}
