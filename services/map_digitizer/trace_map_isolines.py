@@ -193,6 +193,8 @@ def trace(
     output_dir: Path,
     scale: float = 0.25,
     readings_path: Path | None = None,
+    inventory_id: str | None = None,
+    survey_shape_path: Path | None = None,
 ) -> Path:
     original = imread_gray(source)
     height, width = original.shape
@@ -243,6 +245,22 @@ def trace(
                 continue
             cv2.line(profile_mask, (x1, y1), (x2, y2), 255, 5)
             profile_segments += 1
+
+    survey_profiles = {"status": "not_requested"}
+    if inventory_id and survey_shape_path and survey_shape_path.exists() and readings_path:
+        from services.map_digitizer.survey_profiles import build_survey_profile_mask
+
+        ocr_payload = json.loads(readings_path.read_text(encoding="utf-8"))
+        survey_profiles = build_survey_profile_mask(
+            linework,
+            ocr_payload,
+            inventory_id=inventory_id,
+            shape_path=survey_shape_path,
+            scale=scale,
+            output_dir=output_dir,
+        )
+        survey_mask = survey_profiles.pop("mask")
+        profile_mask = cv2.bitwise_or(profile_mask, survey_mask)
 
     residual = cv2.bitwise_and(linework, cv2.bitwise_not(profile_mask))
     frame = max(10, int(min(residual.shape) * 0.02))
@@ -332,6 +350,7 @@ def trace(
         "manifest": str(manifest) if manifest else None,
         "scale": scale,
         "profile_segments_removed": profile_segments,
+        "survey_profiles": survey_profiles,
         "isoline_components": kept_components,
         "vector_polylines": len(polylines),
         "vector_fragments_before_stitching": fragment_count,

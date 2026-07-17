@@ -411,60 +411,55 @@ with materials_tab:
     maps = bundle.get("maps", {})
     source_maps = [item for item in maps.get("sources", []) if item.get("exists")]
     digitized_maps = [item for item in maps.get("digitized", []) if item.get("exists")]
-    source_column, digitized_column = st.columns(2, gap="large")
-    with source_column:
-        st.subheader("Исходные карты")
-        if not source_maps:
-            st.info("Карты в отчёте не обнаружены.")
-        for source in source_maps:
-            preview = image_preview(source["path"])
-            if preview is not None:
-                st.image(preview, caption=source["label"], width="stretch")
+    page_ids = list(dict.fromkeys(item.get("page_id") for item in source_maps if item.get("page_id")))
+    if not page_ids:
+        st.info("Карты в отчёте не обнаружены.")
+    else:
+        selected_page = st.selectbox(
+            "Лист",
+            page_ids,
+            format_func=lambda page_id: next(
+                (item.get("label") or page_id for item in source_maps if item.get("page_id") == page_id),
+                page_id,
+            ),
+        )
+        source = next((item for item in source_maps if item.get("page_id") == selected_page), None)
+        page_artifacts = [item for item in digitized_maps if item.get("page_id") == selected_page]
+        result = next(
+            (item for item in page_artifacts if item.get("name") == "surface_clean_preview"),
+            None,
+        )
+        source_column, result_column = st.columns(2, gap="large")
+        with source_column:
+            st.subheader("Исходная карта")
+            source_preview = image_preview(source["path"]) if source else None
+            if source_preview is not None:
+                st.image(source_preview, width="stretch")
+        with result_column:
+            st.subheader("Оцифрованная карта")
+            result_preview = image_preview(result["path"]) if result else None
+            if result_preview is not None:
+                st.image(result_preview, width="stretch")
             else:
-                st.warning(f"Предпросмотр недоступен: {Path(source['path']).name}")
-    with digitized_column:
-        st.subheader("Оцифрованные карты")
-        clean_pages = {
-            item.get("page_id")
-            for item in digitized_maps
-            if item.get("name") == "surface_clean_preview"
-        }
-        image_maps = [
+                st.info("Этот лист пока не оцифрован.")
+
+        downloads = [
             item
-            for item in digitized_maps
-            if str(item.get("media_type", "")).startswith("image/")
-            and not (
-                item.get("name") == "surface_preview"
-                and item.get("page_id") in clean_pages
-            )
+            for item in page_artifacts
+            if item.get("name") in {"pixel_contours", "local_cps3"}
         ]
-        if not image_maps:
-            st.info("Оцифрованной версии пока нет.")
-        for artifact in image_maps:
-            preview = image_preview(artifact["path"])
-            if preview is not None:
-                quality = str(artifact.get("quality", {}).get("status") or "").casefold()
-                quality_label = "требует проверки" if quality == "review" else "принято" if quality == "accepted" else ""
-                caption = artifact.get("label") or artifact.get("name")
-                st.image(preview, caption=f"{caption} · {quality_label}" if quality_label else caption, width="stretch")
-            else:
-                st.warning(f"Предпросмотр недоступен: {Path(artifact['path']).name}")
-        for artifact_index, artifact in enumerate(digitized_maps):
+        download_columns = st.columns(max(1, len(downloads)))
+        for index, (column, artifact) in enumerate(zip(download_columns, downloads)):
             path = resolve_artifact_path(str(artifact.get("path") or ""))
-            if path.suffix.casefold() in {".geojson", ".gpkg", ".cps3"}:
-                if path.is_file():
-                    st.download_button(
-                        artifact.get("label") or path.name,
-                        data=path.read_bytes(),
-                        file_name=path.name,
-                        mime=str(artifact.get("media_type") or "application/octet-stream"),
-                        key=(
-                            f"map-download:{report_id}:"
-                            f"{artifact.get('artifact_id') or artifact_index}"
-                        ),
-                    )
-                else:
-                    st.warning(f"Файл результата недоступен: {path.name}")
+            if path.is_file():
+                column.download_button(
+                    "Скачать GeoJSON" if artifact.get("name") == "pixel_contours" else "Скачать CPS-3",
+                    data=path.read_bytes(),
+                    file_name=path.name,
+                    mime=str(artifact.get("media_type") or "application/octet-stream"),
+                    key=f"map-download:{report_id}:{selected_page}:{index}",
+                    use_container_width=True,
+                )
 
 with search_tab:
     st.subheader("Вопрос к отчёту")

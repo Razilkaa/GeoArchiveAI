@@ -131,6 +131,8 @@ def run_report_maps(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     run_dir = manifest_path.parent
     source_root = Path(str(manifest.get("source_root") or ""))
+    inventory_id = str(manifest.get("report_id") or source_root.name)
+    survey_shape_path = Path(__file__).resolve().parents[2] / "shapes" / "srr_all.shp"
     output_root = run_dir / "map_agent"
     jobs_root = output_root / "jobs"
     cache_root = output_root / "page_cache"
@@ -229,6 +231,8 @@ def run_report_maps(
                     source,
                     job_dir,
                     ocr_api_url=ocr_api_url,
+                    inventory_id=inventory_id,
+                    survey_shape_path=survey_shape_path,
                 )
             routed_type = str(page.get("content_type") or "map")
             effective_status = str(result.get("status"))

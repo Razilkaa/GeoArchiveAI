@@ -196,6 +196,8 @@ def run_pipeline(
     trace_scale: float = 0.6,
     ocr_timeout: float = 120.0,
     ocr_client: Callable[[Path, str, float], dict] = request_ocr,
+    inventory_id: str | None = None,
+    survey_shape_path: Path | None = None,
 ) -> dict:
     image_path = image_path.resolve()
     source_stat = image_path.stat()
@@ -258,7 +260,15 @@ def run_pipeline(
     trace_dir = output_dir / "trace"
     summary_path = execute(
         "trace",
-        lambda: trace(image_path, None, trace_dir, trace_scale, ocr_path),
+        lambda: trace(
+            image_path,
+            None,
+            trace_dir,
+            trace_scale,
+            ocr_path,
+            inventory_id=inventory_id,
+            survey_shape_path=survey_shape_path,
+        ),
     )
     trace_metrics = json.loads(summary_path.read_text(encoding="utf-8"))
     result["stages"]["trace"]["metrics"] = trace_metrics
@@ -373,6 +383,8 @@ def main() -> None:
     parser.add_argument("--ocr-timeout", type=float, default=120.0)
     parser.add_argument("--interval", type=float)
     parser.add_argument("--trace-scale", type=float, default=0.6)
+    parser.add_argument("--inventory-id")
+    parser.add_argument("--survey-shape", type=Path)
     args = parser.parse_args()
     result = run_pipeline(
         args.image,
@@ -380,6 +392,8 @@ def main() -> None:
         ocr_api_url=args.ocr_api_url,
         interval=args.interval,
         trace_scale=args.trace_scale,
+        inventory_id=args.inventory_id,
+        survey_shape_path=args.survey_shape,
         ocr_timeout=args.ocr_timeout,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))

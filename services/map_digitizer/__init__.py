@@ -1,3 +1,3 @@
 """The production map-digitization pipeline."""
 
-PIPELINE_VERSION = 4
+PIPELINE_VERSION = 5
