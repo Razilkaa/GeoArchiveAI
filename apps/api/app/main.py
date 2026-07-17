@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.routers import reports, system
+from app.routers import maps, reports, system
 from app.config import settings
 from app.services.automation import InboxMonitor, stop_monitor
 
@@ -21,9 +21,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="GeoArchiveAI API",
-    description="Control plane for report intake, OCR, RAGFlow and extraction agents.",
-    version="0.3.0",
+    description="Control plane for report intake, OCR, RAGFlow and map digitization.",
+    version="0.4.0",
     lifespan=lifespan,
 )
 app.include_router(system.router)
 app.include_router(reports.router)
+app.include_router(maps.router)

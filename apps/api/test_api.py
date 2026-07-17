@@ -55,6 +55,9 @@ class ApiTest(unittest.TestCase):
         self.assertIn("/api/reports/{report_id}/run", paths)
         self.assertIn("/api/queue", paths)
         self.assertIn("/api/search", paths)
+        self.assertIn("/api/maps/jobs", paths)
+        self.assertIn("/api/maps/jobs/{job_id}", paths)
+        self.assertIn("/api/maps/jobs/{job_id}/georeference", paths)
 
     @patch.object(report_router, "corpus_search_service")
     def test_corpus_search_endpoint(self, service_factory):

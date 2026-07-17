@@ -22,3 +22,16 @@ class IntakeResponse(BaseModel):
     uploaded_name: str | None = None
     started: int = 0
     queued: int = 0
+
+
+class MapControlPoint(BaseModel):
+    pixel: tuple[float, float]
+    map: tuple[float, float]
+    name: str | None = None
+
+
+class MapGeoreferenceRequest(BaseModel):
+    target_crs: str
+    control_points: list[MapControlPoint] = Field(min_length=3)
+    cell_size: float | None = Field(default=None, gt=0)
+    name: str = "digitized_surface"

@@ -67,6 +67,30 @@ python -m services.map_digitizer.benchmark "runs/map_batch" `
 python -m unittest discover -s services/map_digitizer/tests -q
 ```
 
+## Georeferencing and API
+
+The pixel grid is georeferenced only after at least three pixel-to-map control
+points and the project CRS are known. Four or more controls provide an
+independent residual check; a three-point affine fit is always marked `review`.
+
+```powershell
+python -m services.map_digitizer.georeference_grid `
+  "runs/maps/example/surface_grid_pixel.npz" "control_points.json" `
+  --output-dir "runs/maps/example/georeferenced" `
+  --target-crs "EPSG:28421" --cell-size 25 --name horizon_k
+```
+
+`control_points.json` is an array of objects with `pixel: [x, y]` and
+`map: [easting, northing]`. The command exports CPS-3, XYZ, PRJ and a QC JSON.
+
+The same workflow is exposed by FastAPI:
+
+- `POST /api/maps/jobs` uploads an image and starts digitization;
+- `GET /api/maps/jobs/{job_id}` returns stage, quality and artifact metadata;
+- `POST /api/maps/jobs/{job_id}/georeference` exports a CRS-aware grid.
+
+Run the API from `apps/api` and inspect the contract at `/docs`.
+
 Исследовательские прототипы и тяжёлые промежуточные файлы остаются в
 `research/map_digitization/` и `pipeline/tracing/`; production-код находится
 только в `services/map_digitizer/`.
