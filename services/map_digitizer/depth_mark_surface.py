@@ -355,10 +355,13 @@ def run(
     np.savez_compressed(npz_path, x=x, y=y, z=-surface)
 
     fig, axes = plt.subplots(1, 2, figsize=(22, 10), dpi=120)
-    axes[0].imshow(image, cmap="gray")
+    preview_step = max(1, int(np.ceil(max(image.shape) / 3000.0)))
+    preview_image = image[::preview_step, ::preview_step]
+    preview_extent = (0, image.shape[1], image.shape[0], 0)
+    axes[0].imshow(preview_image, cmap="gray", extent=preview_extent)
     axes[0].set_title("Source map")
     axes[0].axis("off")
-    axes[1].imshow(image, cmap="gray", alpha=0.18)
+    axes[1].imshow(preview_image, cmap="gray", alpha=0.18, extent=preview_extent)
     levels = np.arange(
         math.ceil(float(np.nanmin(surface)) / interval) * interval,
         float(np.nanmax(surface)) + interval * 0.5,

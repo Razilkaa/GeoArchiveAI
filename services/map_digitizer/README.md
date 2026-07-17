@@ -22,6 +22,20 @@ python -m services.map_digitizer.pipeline "path/to/map.jpg" `
 Повторный запуск использует сохранённый `ocr.json`, поэтому OCR не оплачивается
 и не выполняется заново.
 
+Пакет папок и файлов запускается последовательно и возобновляется после сбоя:
+
+```powershell
+python -m services.map_digitizer.batch "reports/maps" `
+  --output-dir "runs/map_batch"
+```
+
+Сводный benchmark по готовым manifest:
+
+```powershell
+python -m services.map_digitizer.benchmark "runs/map_batch" `
+  --output "runs/map_batch/benchmark.json"
+```
+
 ## Этапы
 
 1. `ocr` читает текст и координаты подписей.

@@ -2,10 +2,42 @@ from __future__ import annotations
 
 import unittest
 
-from services.map_digitizer.pipeline import quality_decision, select_reconstruction_mode
+from services.map_digitizer.pipeline import (
+    assess_ocr_eligibility,
+    quality_decision,
+    select_reconstruction_mode,
+)
 
 
 class PipelineQualityTest(unittest.TestCase):
+    def test_ocr_eligibility_requires_repeated_depth_levels(self):
+        eligible = assess_ocr_eligibility(
+            {
+                "lines": [
+                    {"text": value, "score": 0.99}
+                    for value in ["-800", "-900", "-1000", "-1100", "-1200"]
+                ]
+            }
+        )
+        rejected = assess_ocr_eligibility(
+            {"lines": [{"text": "91501", "score": 0.99}, {"text": "profile", "score": 0.99}]}
+        )
+        self.assertTrue(eligible["eligible"])
+        self.assertFalse(rejected["eligible"])
+
+    def test_ocr_eligibility_rejects_section_aspect_ratio(self):
+        result = assess_ocr_eligibility(
+            {
+                "lines": [
+                    {"text": value, "score": 0.99}
+                    for value in ["-800", "-900", "-1000", "-1100", "-1200"]
+                ]
+            },
+            (20_000, 5_000),
+        )
+        self.assertFalse(result["eligible"])
+        self.assertIn("extreme_aspect_ratio", result["reasons"])
+
     def test_selects_reconstruction_mode_from_profile_measurement_density(self):
         self.assertEqual(
             select_reconstruction_mode({"profile_measurements": 20}),

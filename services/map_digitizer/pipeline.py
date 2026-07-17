@@ -5,17 +5,24 @@ import argparse
 import hashlib
 import json
 import mimetypes
+import re
 import time
 from pathlib import Path
 from typing import Callable
 
 import requests
+from PIL import Image
 
-from services.map_digitizer.assign_contour_values import run as assign_values
+from services.map_digitizer.assign_contour_values import (
+    dominant_value_band,
+    run as assign_values,
+)
 from services.map_digitizer.depth_mark_surface import run as build_depth_surface
 from services.map_digitizer.reconstruct_traced_surface import run as reconstruct_surface
 from services.map_digitizer.trace_guided_surface import run as reconstruct_trace_guided
 from services.map_digitizer.trace_map_isolines import trace
+
+Image.MAX_IMAGE_PIXELS = None
 
 
 def file_sha256(path: Path) -> str:
@@ -41,6 +48,50 @@ def request_ocr(image_path: Path, api_url: str, timeout: float = 120.0) -> dict:
     if not isinstance(payload.get("lines"), list):
         raise ValueError("OCR response has no lines array")
     return payload
+
+
+def assess_ocr_eligibility(
+    ocr_payload: dict, image_size: tuple[int, int] | None = None
+) -> dict:
+    negative_values = []
+    profile_measurements = 0
+    for line in ocr_payload.get("lines") or []:
+        if float(line.get("score") or 0.0) < 0.75:
+            continue
+        text = str(line.get("text", "")).strip().replace(",", ".")
+        text = text.replace("−", "-").replace("–", "-")
+        if re.fullmatch(r"-[0-9]+(?:\.[0-9]{1,3})?", text):
+            value = abs(float(text))
+            negative_values.append(value / 1000.0 if value >= 100.0 else value)
+        elif re.fullmatch(r"[0-9]{3,4}", text) and 500 <= int(text) <= 5000:
+            profile_measurements += 1
+    band = dominant_value_band(negative_values, 0.1)
+    retained = (
+        [value for value in negative_values if band[0] <= value <= band[1]]
+        if band
+        else negative_values
+    )
+    unique_levels = len(set(round(value, 3) for value in retained))
+    eligible = (len(retained) >= 5 and unique_levels >= 3) or (
+        profile_measurements >= 20 and len(retained) >= 3
+    )
+    reasons = [] if eligible else ["insufficient_depth_label_evidence"]
+    aspect_ratio = None
+    if image_size:
+        aspect_ratio = max(image_size) / max(1, min(image_size))
+        if aspect_ratio > 2.5:
+            eligible = False
+            reasons.append("extreme_aspect_ratio")
+    return {
+        "eligible": eligible,
+        "reasons": reasons,
+        "negative_depth_labels": len(negative_values),
+        "retained_depth_labels": len(retained),
+        "unique_depth_levels": unique_levels,
+        "profile_measurement_candidates": profile_measurements,
+        "depth_band_km": list(band) if band else None,
+        "aspect_ratio": round(aspect_ratio, 4) if aspect_ratio else None,
+    }
 
 
 def quality_decision(assignment: dict, reconstruction: dict) -> dict:
@@ -164,6 +215,18 @@ def run_pipeline(
         )
         ocr_path.write_text(json.dumps(ocr_payload, ensure_ascii=False), encoding="utf-8")
     result["artifacts"]["ocr"] = str(ocr_path)
+    with Image.open(image_path) as source_image:
+        image_size = source_image.size
+    eligibility = assess_ocr_eligibility(ocr_payload, image_size)
+    result["eligibility"] = eligibility
+    if not eligibility["eligible"]:
+        result["status"] = "not_applicable"
+        result["quality"] = {"status": "not_applicable", "reasons": eligibility["reasons"]}
+        result["total_latency_s"] = round(
+            sum(float(stage["latency_s"]) for stage in result["stages"].values()), 3
+        )
+        result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        return result
 
     trace_dir = output_dir / "trace"
     summary_path = execute(
@@ -185,6 +248,20 @@ def run_pipeline(
         ),
     )
     result["stages"]["assignment"]["metrics"] = assignment
+    if (
+        int(assignment.get("confident_polylines", 0)) < 3
+        and int(assignment.get("profile_measurements", 0)) < 20
+    ):
+        result["status"] = "not_applicable"
+        result["quality"] = {
+            "status": "not_applicable",
+            "reasons": ["insufficient_traced_contour_support"],
+        }
+        result["total_latency_s"] = round(
+            sum(float(stage["latency_s"]) for stage in result["stages"].values()), 3
+        )
+        result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        return result
 
     reconstruction_dir = output_dir / "surface"
     reconstruction = execute(

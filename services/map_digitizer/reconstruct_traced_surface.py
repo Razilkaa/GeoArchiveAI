@@ -175,7 +175,12 @@ def run(
     np.savez_compressed(grid_path, x=grid.x, y=grid.y, z=grid.z)
 
     fig, axes = plt.subplots(1, 2, figsize=(22, 10), dpi=120)
-    axes[0].imshow(background, cmap="gray")
+    preview_step = max(1, int(np.ceil(max(background.shape) / 3000.0)))
+    axes[0].imshow(
+        background[::preview_step, ::preview_step],
+        cmap="gray",
+        extent=(0, background.shape[1], background.shape[0], 0),
+    )
     direct = source_frame[source_frame["source"] == "ocr_label"]
     inferred = source_frame[source_frame["source"] != "ocr_label"]
     inferred.plot(ax=axes[0], color="#00a36c", linewidth=1.0)

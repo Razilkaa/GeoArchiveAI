@@ -424,7 +424,14 @@ def run(
     )
 
     fig, ax = plt.subplots(figsize=(16, 13), dpi=120)
-    ax.imshow(image, cmap="gray", alpha=0.25)
+    preview_step = max(1, int(np.ceil(max(image.shape) / 3000.0)))
+    preview_image = image[::preview_step, ::preview_step]
+    ax.imshow(
+        preview_image,
+        cmap="gray",
+        alpha=0.25,
+        extent=(0, image.shape[1], image.shape[0], 0),
+    )
     values = list(result["values"].values())
     low, high = (min(values), max(values)) if values else (-5.0, -1.0)
     cmap = plt.get_cmap("turbo")

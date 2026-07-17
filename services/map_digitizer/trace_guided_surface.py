@@ -214,7 +214,12 @@ def run(
     with Image.open(source_path) as source:
         background = np.asarray(source.convert("L"))
     fig, axes = plt.subplots(1, 2, figsize=(22, 10), dpi=120)
-    axes[0].imshow(background, cmap="gray")
+    preview_step = max(1, int(np.ceil(max(background.shape) / 3000.0)))
+    axes[0].imshow(
+        background[::preview_step, ::preview_step],
+        cmap="gray",
+        extent=(0, background.shape[1], background.shape[0], 0),
+    )
     for item in assignments:
         points = np.asarray(item["geometry"].coords) / scale
         color = "#00a36c" if item["accepted"] else "#cc3344" if item["profile_suspect"] else "#999999"
