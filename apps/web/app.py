@@ -150,10 +150,17 @@ def _cached_image_preview(
     return load_image_preview(path, max_size)
 
 
+def resolve_artifact_path(path: str | Path) -> Path:
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        candidate = PROJECT_ROOT / candidate
+    return candidate.resolve()
+
+
 def image_preview(path: str, max_size: tuple[int, int] = (1800, 1100)):
-    source = Path(path)
+    source = resolve_artifact_path(path)
     modified_ns = source.stat().st_mtime_ns if source.exists() else 0
-    return _cached_image_preview(path, modified_ns, max_size)
+    return _cached_image_preview(str(source), modified_ns, max_size)
 
 
 def clean_filename(name: str) -> str:
@@ -426,16 +433,22 @@ with materials_tab:
                 st.image(preview, caption=artifact.get("label") or artifact.get("name"), width="stretch")
             else:
                 st.warning(f"Предпросмотр недоступен: {Path(artifact['path']).name}")
-        for artifact in digitized_maps:
-            path = Path(str(artifact.get("path") or ""))
+        for artifact_index, artifact in enumerate(digitized_maps):
+            path = resolve_artifact_path(str(artifact.get("path") or ""))
             if path.suffix.casefold() in {".geojson", ".json", ".gpkg", ".cps3", ".xyz", ".prj"}:
-                st.download_button(
-                    artifact.get("label") or path.name,
-                    data=path.read_bytes(),
-                    file_name=path.name,
-                    mime=str(artifact.get("media_type") or "application/octet-stream"),
-                    key=f"map-download:{report_id}:{artifact.get('name')}",
-                )
+                if path.is_file():
+                    st.download_button(
+                        artifact.get("label") or path.name,
+                        data=path.read_bytes(),
+                        file_name=path.name,
+                        mime=str(artifact.get("media_type") or "application/octet-stream"),
+                        key=(
+                            f"map-download:{report_id}:"
+                            f"{artifact.get('artifact_id') or artifact_index}"
+                        ),
+                    )
+                else:
+                    st.warning(f"Файл результата недоступен: {path.name}")
 
 with search_tab:
     st.subheader("Вопрос к отчёту")

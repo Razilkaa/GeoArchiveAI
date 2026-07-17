@@ -17,6 +17,8 @@ runs/
 pipeline/output/
 pipeline/output_v4/
 pipeline/spotter_test/
-pipeline/tracing/out/
+pipeline/tracing/
 services/ocr/models/
 research/map_digitization/artifacts/
+research/map_digitization/tracing/out/
+shapes/
