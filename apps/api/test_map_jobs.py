@@ -67,6 +67,29 @@ class MapJobsApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 429)
         self.assertEqual(response.json()["detail"], "map_job_capacity_reached")
 
+    @patch.object(map_jobs.os, "kill")
+    def test_active_count_ignores_completed_and_dead_jobs(self, kill):
+        running = self.settings.runs_root / "map_jobs" / ("1" * 32)
+        dead = self.settings.runs_root / "map_jobs" / ("2" * 32)
+        completed = self.settings.runs_root / "map_jobs" / ("3" * 32)
+        for directory, pid in ((running, 101), (dead, 202), (completed, 303)):
+            directory.mkdir(parents=True)
+            (directory / "job.json").write_text(
+                json.dumps({"pid": pid}), encoding="utf-8"
+            )
+        (completed / "pipeline_result.json").write_text(
+            json.dumps({"status": "accepted"}), encoding="utf-8"
+        )
+
+        def process_state(pid, _signal):
+            if pid == 202:
+                raise OSError("process exited")
+
+        kill.side_effect = process_state
+
+        self.assertEqual(map_jobs.active_map_job_count(), 1)
+        self.assertEqual([call.args[0] for call in kill.call_args_list], [101, 202])
+
     def test_status_returns_completed_manifest(self):
         job_id = "a" * 32
         directory = self.settings.runs_root / "map_jobs" / job_id
