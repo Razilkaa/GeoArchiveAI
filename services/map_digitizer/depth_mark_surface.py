@@ -15,12 +15,14 @@ from scipy.spatial import Delaunay, cKDTree
 from shapely.geometry import LineString
 from skimage.measure import find_contours
 
+from services.map_digitizer.assign_contour_values import dominant_value_band
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
 DEPTH_PATTERN = re.compile(r"^-?[0-9]+\.[0-9]{2}$")
-CONTOUR_PATTERN = re.compile(r"^-[0-9]+\.[0-9]$")
+CONTOUR_PATTERN = re.compile(r"^-[0-9]+(?:\.[0-9]{1,3})?$")
 
 
 def image_scale(readings_path: Path, image_size: tuple[int, int]) -> tuple[float, float, int, int]:
@@ -94,6 +96,8 @@ def extract_measurements(
                     marks.append((x, y, value))
             elif CONTOUR_PATTERN.match(text):
                 value = abs(float(text))
+                if value >= 100.0 and contour_interval < 10.0:
+                    value /= 1000.0
                 snapped = round(value / contour_interval) * contour_interval
                 if abs(value - snapped) <= 0.03:
                     labels.append((x, y, snapped))
@@ -287,14 +291,23 @@ def run(
                 "ocr_to_trace_scale": [round(scale_x, 6), round(scale_y, 6)],
             }
         )
-    raw_marks = np.vstack([part for _, part in mark_parts if len(part)])
+    available_marks = [part for _, part in mark_parts if len(part)]
+    raw_marks = np.vstack(available_marks) if available_marks else np.empty((0, 3))
     labels = np.vstack([part for _, part in label_parts if len(part)]) if any(len(part) for _, part in label_parts) else np.empty((0, 3))
     dedupe_radius = max(8.0, min(image.shape) * 0.003)
     raw_count_before_merge = len(raw_marks)
     labels = merge_nearby_measurements(labels, dedupe_radius)
+    raw_label_count = len(labels)
+    label_band = dominant_value_band(labels[:, 2].tolist(), interval) if len(labels) else None
+    if label_band is not None:
+        labels = labels[(labels[:, 2] >= label_band[0]) & (labels[:, 2] <= label_band[1])]
     marks, fusion_metrics = fuse_measurement_sources(mark_parts, radius=dedupe_radius)
-    if len(marks) < 20:
-        raise ValueError(f"Only {len(marks)} valid depth marks; at least 20 are required")
+    surface_mode = "dense_profile_measurements"
+    if len(marks) < 20 and len(labels) >= 5:
+        marks = labels.copy()
+        surface_mode = "sparse_contour_labels"
+    if len(marks) < 5:
+        raise ValueError(f"Only {len(marks)} valid depth constraints; at least 5 are required")
     x, y, surface, interpolator = build_surface(
         marks, (image.shape[1], image.shape[0])
     )
@@ -357,7 +370,7 @@ def run(
     axes[1].scatter(marks[:, 0], marks[:, 1], s=2, color="white", alpha=0.65)
     axes[1].set_xlim(0, image.shape[1])
     axes[1].set_ylim(image.shape[0], 0)
-    axes[1].set_title(f"Surface from {len(marks)} filtered profile marks")
+    axes[1].set_title(f"Surface from {len(marks)} filtered depth constraints")
     axes[1].axis("off")
     fig.colorbar(filled, ax=axes[1], shrink=0.7, label="Depth magnitude, km")
     preview_path = output_dir / "depth_mark_surface_preview.png"
@@ -365,15 +378,23 @@ def run(
     plt.close(fig)
 
     metrics = {
+        "surface_mode": surface_mode,
         "raw_depth_marks": int(len(raw_marks)),
         "raw_depth_marks_before_merge": int(raw_count_before_merge),
         "filtered_depth_marks": int(len(marks)),
-        "retained_mark_rate": round(len(marks) / max(1, len(raw_marks)), 4),
+        "retained_mark_rate": round(
+            len(marks)
+            / max(1, len(raw_marks) if surface_mode == "dense_profile_measurements" else raw_label_count),
+            4,
+        ),
         "fusion": fusion_metrics,
         "trace_image_size": [image.shape[1], image.shape[0]],
         "ocr_sources": source_metrics,
         "dedupe_radius_px": round(dedupe_radius, 2),
         "contour_interval_km": interval,
+        "raw_contour_labels": int(raw_label_count),
+        "retained_contour_labels": int(len(labels)),
+        "contour_label_band_km": list(label_band) if label_band else None,
         "label_crosscheck": label_metrics,
         "topology": topology,
         "files": {

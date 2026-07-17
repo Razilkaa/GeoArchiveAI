@@ -5,11 +5,26 @@ import unittest
 import numpy as np
 from shapely.geometry import LineString
 
-from services.map_digitizer.depth_mark_surface import fuse_measurement_sources
+from services.map_digitizer.depth_mark_surface import extract_measurements, fuse_measurement_sources
 from services.map_digitizer.trace_guided_surface import prune_crossing_constraints
 
 
 class DepthMarkSurfaceTest(unittest.TestCase):
+    def test_reads_metre_contour_labels_as_kilometres(self):
+        readings = [
+            {
+                "zone": "map_body",
+                "quad": [[0, 0], [2, 0], [2, 2], [0, 2]],
+                "values": [{"text": "-1400"}],
+                "unreadable": False,
+            }
+        ]
+        marks, labels = extract_measurements(
+            readings, scale_x=1.0, scale_y=1.0, contour_interval=0.1
+        )
+        self.assertEqual(len(marks), 0)
+        self.assertAlmostEqual(labels[0, 2], 1.4)
+
     def test_paddle_anchors_replace_overlapping_vlm_marks(self):
         paddle = np.array(
             [[index * 20.0, 0.0, 2.0 + index * 0.01] for index in range(12)]

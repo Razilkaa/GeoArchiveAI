@@ -50,7 +50,11 @@ def assign_traced_values(
         valid = np.isfinite(predictions)
         coverage = float(np.mean(valid))
         length = float(LineString(points).length)
-        profile_suspect = straightness(points) < 0.035 and length > 600.0
+        curvature = straightness(points)
+        profile_suspect = (
+            (curvature < 0.01 and length > 100.0)
+            or (curvature < 0.035 and length > 400.0)
+        )
         if np.sum(valid) >= 5:
             values = np.abs(predictions[valid])
             median = float(np.median(values))
@@ -133,6 +137,9 @@ def run(
         (y, x), np.abs(z), bounds_error=False, fill_value=np.nan
     )
     assignments = assign_traced_values(polylines, interpolator, interval=interval)
+    finite_surface = np.abs(z[np.isfinite(z)])
+    direct_low = -float(finite_surface.max()) - interval * 2
+    direct_high = -float(finite_surface.min()) + interval * 2
     direct_labels: dict[int, float] = {}
     for label_path in label_paths or []:
         scale_x, scale_y, ocr_width, ocr_height = image_scale(
@@ -150,7 +157,7 @@ def run(
         )
         for index in direct["confident"]:
             value = float(direct["values"][index])
-            if -8.0 <= value <= -1.0:
+            if direct_low <= value <= direct_high:
                 direct_labels[index] = value
     for item in assignments:
         if item["id"] in direct_labels and not item["profile_suspect"]:
@@ -177,11 +184,21 @@ def run(
         for item in accepted
     ]
     contours = gpd.GeoDataFrame(source_rows, geometry="geometry", crs="EPSG:3857")
+    support = gpd.GeoDataFrame(
+        [
+            {"value_km": 0.0, "geometry": item["geometry"]}
+            for item in assignments
+            if not item["profile_suspect"]
+        ],
+        geometry="geometry",
+        crs="EPSG:3857",
+    )
     grid, grid_quality = build_harmonic_grid(
         contours,
         cell_size=max(15.0, min(target_size) / 250.0),
         blanking_distance=min(target_size) / 12.0,
         constraint_weight=25.0,
+        support_contours=support,
     )
     reconstructed = extract_surface_contours(grid, interval=interval * 1000.0)
     topology = contour_topology(reconstructed)

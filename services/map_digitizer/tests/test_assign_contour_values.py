@@ -25,6 +25,7 @@ class AssignContourValuesTest(unittest.TestCase):
         interval, details = infer_contour_interval(readings)
         self.assertEqual(interval, 0.025)
         self.assertEqual(details["unique_labels"], 5)
+        self.assertEqual(details["selected_support"], 1.0)
 
     def test_interval_inference_ignores_profile_corridors(self):
         readings = [

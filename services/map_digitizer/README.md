@@ -1,36 +1,58 @@
 # Map digitizer
 
-Изолированный сервисный модуль для трассировки изолиний, присвоения значений и
-экспорта результата map-агента. Сейчас это библиотека с контрактом и тестами;
-HTTP-обёртка будет добавлена после стабилизации качества на нескольких картах.
+Детерминированный конвейер оцифровки структурных карт. LLM не участвует в
+геометрии: PaddleOCR читает подписи, OpenCV выделяет линии, численный модуль
+строит топологически корректную поверхность.
 
-Экспериментальные детекторы и артефакты находятся в
-`research/map_digitization/` и не входят в продуктовый pipeline.
+## Запуск
 
-## Геопривязка профильной сети
-
-Для контрольного листа 23 эксперимент воспроизводится тремя стадиями:
+Сервис PaddleOCR должен отвечать на `http://127.0.0.1:18080`.
 
 ```powershell
-python research/map_digitization/tracing/detect_profile_lines.py <scan> `
-  --output pipeline/tracing/out/23/profile_lines.json
-python research/map_digitization/tracing/match_profile_labels.py `
-  --readings pipeline/output_v4/23/readings.jsonl `
-  --lines pipeline/tracing/out/23/profile_lines.json `
-  --inventory pipeline/tracing/out/profiles_384092.geojson `
-  --output pipeline/tracing/out/23/profile_matches.json
-python research/map_digitization/tracing/georeference_profiles_23.py `
-  --lines pipeline/tracing/out/23/profile_lines.json `
-  --matches pipeline/tracing/out/23/profile_matches.json `
-  --inventory pipeline/tracing/out/profiles_384092.geojson `
-  --isolines pipeline/tracing/out/23/isolines_23.geojson `
-  --gpkg pipeline/tracing/out/23/sheet_23_provisional.gpkg `
-  --qc pipeline/tracing/out/23/georeference_qc.json `
-  --preview pipeline/tracing/out/23/georeference_preview.png
+python -m services.map_digitizer.pipeline "path/to/map.jpg" `
+  --output-dir "runs/maps/example"
 ```
 
-GeoPackage использует `EPSG:2509` и содержит слои изолиний, кандидатов в
-сейсмические профили и опорных профилей. Результат остаётся в статусе `review`,
-пока третий, геометрически найденный поперечный профиль не подтверждён подписью.
-`map_trace_adapter.py` автоматически публикует GeoPackage и превью при наличии
-`georeference_qc.json`.
+Необязательные параметры:
+
+- `--interval 0.1` фиксирует сечение в километрах; без него сечение определяется автоматически.
+- `--trace-scale 0.6` задаёт рабочее разрешение трассировщика.
+- `--ocr-api-url http://host:18080` переопределяет адрес GPU OCR.
+
+Повторный запуск использует сохранённый `ocr.json`, поэтому OCR не оплачивается
+и не выполняется заново.
+
+## Этапы
+
+1. `ocr` читает текст и координаты подписей.
+2. `trace` отделяет профили, текст и изолинии и сшивает разрывы.
+3. `assignment` определяет сечение, присваивает значения и фильтрует OCR-выбросы.
+4. `reconstruction` автоматически выбирает режим:
+   - `dense_profile_measurements` для карт с плотными отметками на профилях;
+   - `sparse_labels_trace_guided` для карт только с подписями изолиний.
+5. `quality` проверяет ошибки ограничений, пересечения, диапазон и лишние замыкания.
+
+## Результат
+
+Главный контракт находится в `pipeline_result.json`:
+
+- `status`: `accepted`, `review` или `failed`;
+- `stages`: время и метрики каждого этапа;
+- `quality.reasons`: причины ручной или модельной проверки;
+- `artifacts.surface_preview`: сравнение исходника и результата;
+- `artifacts.pixel_grid`: сетка в пиксельной системе до геопривязки;
+- `artifacts.pixel_contours`: изолинии GeoJSON в пикселях.
+
+Каждая ошибка сохраняется вместе с `failed_stage`; сбой одной страницы не должен
+останавливать пакет отчётов. CPS-3 экспорт выполняется только после определения
+аффинного преобразования и системы координат проекта.
+
+## Проверка
+
+```powershell
+python -m unittest discover -s services/map_digitizer/tests -q
+```
+
+Исследовательские прототипы и тяжёлые промежуточные файлы остаются в
+`research/map_digitization/` и `pipeline/tracing/`; production-код находится
+только в `services/map_digitizer/`.

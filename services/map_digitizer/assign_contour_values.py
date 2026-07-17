@@ -92,13 +92,19 @@ def infer_contour_interval(readings: list[dict]) -> tuple[float, dict]:
             for anchor in unique
         )
         scores.append({"interval_km": candidate, "support": round(support, 4)})
+    minimum_support = 0.7
     selected = next(
-        (item["interval_km"] for item in scores if item["support"] >= 0.8),
+        (item["interval_km"] for item in scores if item["support"] >= minimum_support),
         max(scores, key=lambda item: item["support"])["interval_km"],
+    )
+    selected_support = next(
+        item["support"] for item in scores if item["interval_km"] == selected
     )
     return float(selected), {
         "label_count": len(values),
         "unique_labels": len(unique),
+        "minimum_support": minimum_support,
+        "selected_support": selected_support,
         "scores": scores,
     }
 
@@ -128,9 +134,12 @@ def assign_values(
     max_label_distance: float = 70.0,
 ) -> dict:
     profile_leaks = []
+    profile_suspects = []
     for points in polylines:
         length = float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
-        profile_leaks.append(straightness(points) < 0.035 and length > 400)
+        curvature = straightness(points)
+        profile_leaks.append(curvature < 0.035 and length > 400)
+        profile_suspects.append(curvature < 0.01 and length > 100)
 
     labels = []
     profile_labels = []
@@ -195,19 +204,33 @@ def assign_values(
     profile_measurements = filter_profile_measurements(profile_measurements, interval)
 
     trees = [cKDTree(points) for points in polylines]
+    line_lengths = [
+        float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
+        for points in polylines
+    ]
+    minimum_contour_length = max(80.0, max_label_distance * 0.75)
     votes: dict[int, list[float]] = {}
+    matched_labels = []
+    label_matches = []
     unmatched = 0
     for x, y, value in labels:
         candidates = [
             (float(tree.query([x, y])[0]), index)
             for index, tree in enumerate(trees)
-            if not profile_leaks[index]
+            if not profile_leaks[index] and line_lengths[index] >= minimum_contour_length
         ]
         distance, index = min(candidates, default=(float("inf"), -1))
         if distance <= max_label_distance:
             votes.setdefault(index, []).append(value)
+            matched_labels.append((x, y, value))
+            label_matches.append(
+                {"x": x, "y": y, "value_km": value, "line_id": index, "distance_px": distance}
+            )
         else:
             unmatched += 1
+            label_matches.append(
+                {"x": x, "y": y, "value_km": value, "line_id": None, "distance_px": distance}
+            )
 
     values = {}
     confident = []
@@ -216,7 +239,9 @@ def assign_values(
         counts = Counter(candidates)
         value, count = counts.most_common(1)[0]
         values[index] = value
-        if len(counts) == 1 or count >= 2 * (len(candidates) - count):
+        if (
+            len(counts) == 1 or count >= 2 * (len(candidates) - count)
+        ) and not profile_suspects[index]:
             confident.append(index)
         else:
             conflicts.append(index)
@@ -225,13 +250,17 @@ def assign_values(
         "confident": confident,
         "conflicts": conflicts,
         "profile_leaks": profile_leaks,
+        "profile_suspects": profile_suspects,
         "labels": labels,
+        "matched_labels": matched_labels,
+        "label_matches": label_matches,
         "profile_labels": profile_labels,
         "profile_measurements": profile_measurements,
         "raw_profile_measurement_count": raw_profile_measurement_count,
         "profile_corridor_labels": profile_corridor_labels,
         "rejected_labels": rejected,
         "unmatched_labels": unmatched,
+        "minimum_contour_length_px": minimum_contour_length,
     }
 
 
@@ -355,7 +384,7 @@ def run(
                 "geometry": {"type": "LineString", "coordinates": points.tolist()},
             }
         )
-    for label_index, (x, y, value) in enumerate(result["labels"]):
+    for label_index, (x, y, value) in enumerate(result["matched_labels"]):
         features.append(
             {
                 "type": "Feature",
@@ -364,12 +393,12 @@ def run(
                     "kind": "contour_label",
                     "value_km": value,
                     "confident": True,
-                    "source": "ocr_label_point",
+                    "source": "ocr_label_soft_constraint",
                 },
                 "geometry": {"type": "Point", "coordinates": [x, y]},
             }
         )
-    point_offset = len(polylines) + len(result["labels"])
+    point_offset = len(polylines) + len(result["matched_labels"])
     for mark_index, (x, y, value) in enumerate(result["profile_measurements"]):
         features.append(
             {
@@ -388,6 +417,10 @@ def run(
     geojson_path.write_text(
         json.dumps({"type": "FeatureCollection", "features": features}, ensure_ascii=False),
         encoding="utf-8",
+    )
+    matches_path = output_dir / "label_matches.json"
+    matches_path.write_text(
+        json.dumps(result["label_matches"], ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
     fig, ax = plt.subplots(figsize=(16, 13), dpi=120)
@@ -421,8 +454,10 @@ def run(
         "source": str(isolines_path),
         "polylines": len(polylines),
         "profile_leaks": int(sum(result["profile_leaks"])),
+        "profile_suspects": int(sum(result["profile_suspects"])),
         "ocr_labels": len(result["labels"]),
-        "point_constraints": len(result["labels"]),
+        "point_constraints": len(result["matched_labels"]),
+        "matched_label_observations": len(result["matched_labels"]),
         "profile_id_labels": len(result["profile_labels"]),
         "profile_corridor_labels": result["profile_corridor_labels"],
         "profile_measurements": len(result["profile_measurements"]),
@@ -438,10 +473,15 @@ def run(
         "contour_interval_inference": interval_inference,
         "snap_tolerance_km": round(snap_tolerance, 5),
         "max_label_distance_px": round(max_label_distance, 2),
+        "minimum_contour_length_px": round(result["minimum_contour_length_px"], 2),
         "ocr_image_size": [ocr_width, ocr_height],
         "trace_image_size": [image.shape[1], image.shape[0]],
         "ocr_to_trace_scale": [round(scale_x, 6), round(scale_y, 6)],
-        "files": {"geojson": str(geojson_path), "preview": str(preview_path)},
+        "files": {
+            "geojson": str(geojson_path),
+            "preview": str(preview_path),
+            "label_matches": str(matches_path),
+        },
     }
     (output_dir / "value_assignment_metrics.json").write_text(
         json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8"

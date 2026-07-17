@@ -94,8 +94,8 @@ def run(
             "source_kind": str(row.kind),
             "constraint_weight": (
                 30.0 if row.geometry.geom_type == "LineString"
-                else 12.0 if row.kind == "contour_label"
-                else 2.0
+                else 0.5 if row.kind == "contour_label"
+                else 0.5
             ),
             "coverage": 1.0,
             "spread_km": 0.0,
