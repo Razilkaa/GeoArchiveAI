@@ -85,6 +85,38 @@ class PipelineQualityTest(unittest.TestCase):
         decision = quality_decision(assignment, reconstruction)
         self.assertIn("excessive_closed_contours", decision["reasons"])
 
+    def test_flags_implausibly_dense_level_family(self):
+        assignment = {"contour_interval_km": 0.01, "confident_polylines": 5}
+        reconstruction = {
+            "accepted_traces": 40,
+            "grid_quality": {
+                "constraint_p95_abs_error_m": 2.0,
+                "value_range_preserved": True,
+            },
+            "topology": {"crossing_pairs": 0, "levels": 95, "closed_segments": 164},
+        }
+        decision = quality_decision(assignment, reconstruction)
+        self.assertIn("excessive_contour_levels", decision["reasons"])
+        self.assertIn("excessive_closed_contours", decision["reasons"])
+
+    def test_sparse_surface_without_profile_network_requires_review(self):
+        assignment = {
+            "contour_interval_km": 0.2,
+            "confident_polylines": 6,
+            "profile_id_labels": 5,
+        }
+        reconstruction = {
+            "reconstruction_mode": "sparse_labels_trace_guided",
+            "accepted_traces": 30,
+            "grid_quality": {
+                "constraint_p95_abs_error_m": 5.0,
+                "value_range_preserved": True,
+            },
+            "topology": {"crossing_pairs": 0, "levels": 5, "closed_segments": 2},
+        }
+        decision = quality_decision(assignment, reconstruction)
+        self.assertIn("weak_profile_network_evidence", decision["reasons"])
+
     def test_recognizes_expected_sparse_reconstruction_failure(self):
         self.assertTrue(
             insufficient_reconstruction_support(

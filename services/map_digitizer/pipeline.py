@@ -85,10 +85,26 @@ def quality_decision(assignment: dict, reconstruction: dict) -> dict:
     if reconstruction["topology"]["crossing_pairs"]:
         reasons.append("contour_crossings")
     topology = reconstruction["topology"]
-    if int(topology.get("closed_segments", 0)) > max(
-        8, int(topology.get("levels", 0)) * 2
-    ):
+    level_count = int(topology.get("levels", 0))
+    support_count = int(
+        reconstruction.get("accepted_traces", reconstruction.get("final_constraints", 0))
+    )
+    closure_limit = max(
+        8,
+        min(
+            max(1, level_count) * 2,
+            max(1, support_count) * 2,
+        ),
+    )
+    if int(topology.get("closed_segments", 0)) > closure_limit:
         reasons.append("excessive_closed_contours")
+    if level_count > 40:
+        reasons.append("excessive_contour_levels")
+    if (
+        reconstruction.get("reconstruction_mode") == "sparse_labels_trace_guided"
+        and int(assignment.get("profile_id_labels", 0)) < 10
+    ):
+        reasons.append("weak_profile_network_evidence")
     if p95_error > interval_m * 0.5:
         reasons.append("constraint_error_exceeds_half_interval")
     if not reconstruction["grid_quality"]["value_range_preserved"]:
