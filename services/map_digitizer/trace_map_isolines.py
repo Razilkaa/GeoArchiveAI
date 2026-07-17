@@ -9,6 +9,8 @@ import cv2
 import numpy as np
 from scipy.spatial import cKDTree
 
+from services.map_digitizer.source_preserving_trace import trace_source_geometry
+
 
 def imread_gray(path: Path) -> np.ndarray:
     image = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
@@ -198,109 +200,28 @@ def trace(
 ) -> Path:
     original = imread_gray(source)
     height, width = original.shape
-    small = cv2.resize(original, (int(width * scale), int(height * scale)), interpolation=cv2.INTER_AREA)
-    _, ink = cv2.threshold(small, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    geometry = trace_source_geometry(original)
+    polylines = geometry["polylines"]
+    profile_mask = geometry["profile_mask"]
+    isolines = geometry["isoline_mask"]
+    fragment_count = geometry["fragment_count"]
+    profile_segments = geometry["profile_segments"]
+    survey_profiles = {"status": "deferred_until_georeferencing"}
 
-    scaled_boxes = []
-    box_source = manifest or readings_path
-    for x, y, box_width, box_height in load_boxes(box_source):
-        margin = 5
-        scaled_boxes.append(
-            (
-                max(0, int((x - margin) * scale)),
-                max(0, int((y - margin) * scale)),
-                min(ink.shape[1], int((x + box_width + margin) * scale)),
-                min(ink.shape[0], int((y + box_height + margin) * scale)),
-            )
-        )
-    text_mask = np.zeros_like(ink)
-    component_count, component_labels, component_stats, component_centers = cv2.connectedComponentsWithStats(
-        ink, connectivity=8
+    preview_scale = min(1.0, 3000.0 / max(height, width))
+    preview = cv2.resize(
+        original,
+        (round(width * preview_scale), round(height * preview_scale)),
+        interpolation=cv2.INTER_AREA,
     )
-    text_component_ids = np.zeros(component_count, dtype=bool)
-    for index in range(1, component_count):
-        x, y, component_width, component_height, area = component_stats[index]
-        center_x, center_y = component_centers[index]
-        if max(component_width, component_height) > 34 or area > 520:
-            continue
-        if any(x0 <= center_x <= x1 and y0 <= center_y <= y1 for x0, y0, x1, y1 in scaled_boxes):
-            text_component_ids[index] = True
-    text_mask[text_component_ids[component_labels]] = 255
-    linework = cv2.bitwise_and(ink, cv2.bitwise_not(text_mask))
-
-    profile_mask = np.zeros_like(linework)
-    lines = cv2.HoughLinesP(
-        linework,
-        rho=1,
-        theta=np.pi / 720,
-        threshold=120,
-        minLineLength=max(180, int(min(linework.shape) * 0.12)),
-        maxLineGap=28,
-    )
-    profile_segments = 0
-    if lines is not None:
-        for x1, y1, x2, y2 in lines.reshape(-1, 4):
-            length = float(np.hypot(x2 - x1, y2 - y1))
-            if length < min(linework.shape) * 0.14:
-                continue
-            cv2.line(profile_mask, (x1, y1), (x2, y2), 255, 5)
-            profile_segments += 1
-
-    survey_profiles = {"status": "not_requested"}
-    if inventory_id and survey_shape_path and survey_shape_path.exists() and readings_path:
-        from services.map_digitizer.survey_profiles import build_survey_profile_mask
-
-        ocr_payload = json.loads(readings_path.read_text(encoding="utf-8"))
-        survey_profiles = build_survey_profile_mask(
-            linework,
-            ocr_payload,
-            inventory_id=inventory_id,
-            shape_path=survey_shape_path,
-            scale=scale,
-            output_dir=output_dir,
-        )
-        survey_mask = survey_profiles.pop("mask")
-        profile_mask = cv2.bitwise_or(profile_mask, survey_mask)
-
-    residual = cv2.bitwise_and(linework, cv2.bitwise_not(profile_mask))
-    frame = max(10, int(min(residual.shape) * 0.02))
-    residual[:frame, :] = 0
-    residual[-frame:, :] = 0
-    residual[:, :frame] = 0
-    residual[:, -frame:] = 0
-    residual[int(residual.shape[0] * 0.92):, :] = 0
-
-    residual = cv2.morphologyEx(
-        residual,
-        cv2.MORPH_CLOSE,
-        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
-    )
-    count, labels, stats, _ = cv2.connectedComponentsWithStats(residual, connectivity=8)
-    isolines = np.zeros_like(residual)
-    kept_components = 0
-    isoline_component_ids = np.zeros(count, dtype=bool)
-    for index in range(1, count):
-        x, y, component_width, component_height, area = stats[index]
-        span = max(component_width, component_height)
-        if area < 22 or span < 35:
-            continue
-        isoline_component_ids[index] = True
-        kept_components += 1
-    isolines[isoline_component_ids[labels]] = 255
-
-    preview = cv2.cvtColor(small, cv2.COLOR_GRAY2BGR)
-    preview[profile_mask > 0] = (255, 160, 0)
-    preview[isolines > 0] = (0, 0, 220)
+    preview = cv2.cvtColor(preview, cv2.COLOR_GRAY2BGR)
+    preview_profile = cv2.resize(profile_mask, preview.shape[1::-1], interpolation=cv2.INTER_NEAREST)
+    preview_isolines = cv2.resize(isolines, preview.shape[1::-1], interpolation=cv2.INTER_NEAREST)
+    preview[preview_profile > 0] = (255, 160, 0)
+    preview[preview_isolines > 0] = (0, 0, 220)
     imwrite(output_dir / "profile_mask.png", profile_mask)
     imwrite(output_dir / "isoline_mask.png", isolines)
     imwrite(output_dir / "traced_linework_overlay.png", preview)
-    skeleton = skeletonize(isolines)
-    polylines = vectorize_skeleton(skeleton, scale)
-    fragment_count = len(polylines)
-    for gap, alignment in ((12.0, 0.78), (65.0, 0.93), (180.0, 0.98)):
-        polylines = stitch_polylines(
-            polylines, max_gap=gap, minimum_alignment=alignment
-        )
     labels = line_labels(readings_path)
     assignments: dict[int, list[dict]] = {}
     if polylines and labels:
@@ -348,13 +269,15 @@ def trace(
     summary = {
         "source": str(source),
         "manifest": str(manifest) if manifest else None,
-        "scale": scale,
+        "scale": 1.0,
         "profile_segments_removed": profile_segments,
-        "ocr_boxes_considered": len(scaled_boxes),
+        "ocr_boxes_considered": len(load_boxes(manifest or readings_path)),
         "survey_profiles": survey_profiles,
-        "isoline_components": kept_components,
+        "isoline_components": len(polylines),
         "vector_polylines": len(polylines),
         "vector_fragments_before_stitching": fragment_count,
+        "dash_links": geometry["dash_links"],
+        "trace_method": "source_preserving_full_resolution",
         "isoline_value_labels": len(labels),
         "assigned_value_labels": sum(len(value) for value in assignments.values()),
         "status": "geometry_candidate_requires_visual_qc",
