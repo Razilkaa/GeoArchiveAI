@@ -12,8 +12,7 @@ import numpy as np
 from PIL import Image
 
 from services.map_digitizer import PIPELINE_VERSION
-from services.map_digitizer.batch import reusable_result
-from services.map_digitizer.pipeline import run_pipeline
+from services.map_digitizer.pipeline import file_sha256, run_pipeline
 
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
@@ -26,6 +25,27 @@ IMAGE_MEDIA_TYPES = {
     ".tif": "image/tiff",
     ".tiff": "image/tiff",
 }
+
+
+def reusable_result(path: Path, source: Path) -> dict | None:
+    """Reuse a completed result only while its source and pipeline still match."""
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("status") not in {"accepted", "review", "not_applicable"}:
+        return None
+    if payload.get("version") != PIPELINE_VERSION:
+        return None
+    if Path(payload.get("source", "")).resolve() != source.resolve():
+        return None
+    source_stat = source.stat()
+    if (
+        payload.get("source_size_bytes") == source_stat.st_size
+        and payload.get("source_mtime_ns") == source_stat.st_mtime_ns
+    ):
+        return payload
+    expected_hash = payload.get("source_sha256")
+    return payload if expected_hash and expected_hash == file_sha256(source) else None
 
 
 def map_pages(manifest: dict) -> list[dict]:

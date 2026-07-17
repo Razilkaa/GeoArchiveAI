@@ -19,12 +19,10 @@ from services.map_digitizer.assign_contour_values import (
 )
 from services.map_digitizer.depth_mark_surface import run as build_depth_surface
 from services.map_digitizer.ocr_client import request_ocr
-from services.map_digitizer.reconstruct_traced_surface import run as reconstruct_surface
 from services.map_digitizer.trace_guided_surface import run as reconstruct_trace_guided
 from services.map_digitizer.trace_map_isolines import trace
 
 Image.MAX_IMAGE_PIXELS = None
-MIN_DENSE_PROFILE_MEASUREMENTS = 80
 
 
 def file_sha256(path: Path) -> str:
@@ -109,12 +107,12 @@ def quality_decision(assignment: dict, reconstruction: dict) -> dict:
     if level_count > 40:
         reasons.append("excessive_contour_levels")
     if (
-        reconstruction.get("reconstruction_mode") == "sparse_labels_trace_guided"
+        reconstruction.get("reconstruction_mode") == "trace_preserving"
         and int(assignment.get("profile_id_labels", 0)) < 10
     ):
         reasons.append("weak_profile_network_evidence")
-    if reconstruction.get("reconstruction_mode") == "sparse_labels_trace_guided":
-        reasons.append("sparse_reconstruction_requires_review")
+    if reconstruction.get("reconstruction_mode") == "trace_preserving":
+        reasons.append("trace_preserving_reconstruction_requires_review")
     label_crosscheck = (
         reconstruction.get("preliminary_surface", {}).get("label_crosscheck", {})
     )
@@ -137,14 +135,6 @@ def quality_decision(assignment: dict, reconstruction: dict) -> dict:
         "direct_contour_conflict_rate": round(conflicting / max(1, direct_total), 4),
         "label_surface_agreement": label_crosscheck.get("within_one_interval_rate"),
     }
-
-
-def select_reconstruction_mode(assignment: dict) -> str:
-    return (
-        "dense_profile_measurements"
-        if int(assignment.get("profile_measurements", 0)) >= MIN_DENSE_PROFILE_MEASUREMENTS
-        else "sparse_labels_trace_guided"
-    )
 
 
 def insufficient_reconstruction_support(error: ValueError) -> bool:
@@ -171,7 +161,7 @@ def digitized_contours_path(reconstruction: dict) -> str:
     return files.get("digitized_contours") or files["final_contours"]
 
 
-def reconstruct_adaptive(
+def reconstruct_trace_preserving(
     assignment: dict,
     assignment_path: Path,
     traces_path: Path,
@@ -180,14 +170,6 @@ def reconstruct_adaptive(
     output_dir: Path,
 ) -> dict:
     interval = float(assignment["contour_interval_km"])
-    mode = select_reconstruction_mode(assignment)
-    if mode == "dense_profile_measurements":
-        metrics = reconstruct_surface(
-            assignment_path, image_path, output_dir, interval=interval, iterations=3
-        )
-        metrics["reconstruction_mode"] = mode
-        return metrics
-
     preliminary_dir = output_dir / "preliminary"
     preliminary = build_depth_surface(
         ocr_path, image_path, preliminary_dir, interval=interval
@@ -200,7 +182,7 @@ def reconstruct_adaptive(
         trace_image_path=image_path,
         label_paths=[ocr_path],
     )
-    metrics["reconstruction_mode"] = mode
+    metrics["reconstruction_mode"] = "trace_preserving"
     metrics["preliminary_surface"] = preliminary
     return metrics
 
@@ -330,7 +312,7 @@ def run_pipeline(
     try:
         reconstruction = execute(
             "reconstruction",
-            lambda: reconstruct_adaptive(
+            lambda: reconstruct_trace_preserving(
                 assignment,
                 assignment_dir / "valued_contours_pixels.geojson",
                 trace_dir / "isolines.json",

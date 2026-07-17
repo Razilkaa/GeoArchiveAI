@@ -1,4 +1,4 @@
-# FastAPI control plane
+# FastAPI
 
 Запуск из этой директории:
 
@@ -6,11 +6,11 @@
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 ```
 
-- `app/main.py` создаёт приложение и подключает routers.
-- `app/routers/` содержит только HTTP-контракты.
-- `app/services/` содержит регистрацию, jobs и чтение результатов.
-- `app/schemas.py` содержит Pydantic-схемы.
-- `rag_service.py` реализует вопросы по обработанному отчёту.
-- `test_*.py` проверяют API и RAG-контракты.
-
 Swagger: http://127.0.0.1:8765/docs
+
+- `app/main.py` создаёт приложение;
+- `app/routers/` содержит HTTP endpoints;
+- `app/services/` управляет задачами и результатами;
+- `rag_service.py` выполняет retrieval только через RAGFlow и один LLM-вызов.
+
+Локального BM25 и отдельного corpus index в приложении нет.

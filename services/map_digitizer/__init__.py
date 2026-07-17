@@ -1,3 +1,3 @@
-"""Map digitization algorithms and adapter contract."""
+"""The production map-digitization pipeline."""
 
-PIPELINE_VERSION = 3
+PIPELINE_VERSION = 4

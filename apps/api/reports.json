@@ -1,9 +1,0 @@
-{
-  "384092": {
-    "bundle_path": "C:\\Users\\Finam\\Documents\\Codex\\2026-07-13\\new-chat\\outputs\\backend\\report_384092_bundle.json",
-    "ragflow_metadata_path": "C:\\Users\\Finam\\Documents\\Codex\\2026-07-13\\new-chat\\outputs\\full_report_ocr\\ragflow_full_text_retrieval_test.json",
-    "local_corpus_path": "C:\\Users\\Finam\\Documents\\Codex\\2026-07-13\\new-chat\\outputs\\full_report_ocr\\report_384092_text_full_provenance.md",
-    "ragflow_token_path": "C:\\FINAM\\Conference\\secrets\\ragflow_token.txt",
-    "llm_credentials_path": "C:\\FINAM\\Conference\\secrets\\tokent.txt"
-  }
-}

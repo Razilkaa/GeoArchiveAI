@@ -13,6 +13,8 @@ reports_inbox/*
 reports_staging/*
 !reports_staging/.gitkeep
 runs/
+results/**
+!results/README.md
 384092/
 pipeline/output/
 pipeline/output_v4/
@@ -22,3 +24,4 @@ services/ocr/models/
 research/map_digitization/artifacts/
 research/map_digitization/tracing/out/
 shapes/
+work/

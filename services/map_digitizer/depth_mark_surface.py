@@ -302,7 +302,7 @@ def run(
     if label_band is not None:
         labels = labels[(labels[:, 2] >= label_band[0]) & (labels[:, 2] <= label_band[1])]
     marks, fusion_metrics = fuse_measurement_sources(mark_parts, radius=dedupe_radius)
-    surface_mode = "dense_profile_measurements"
+    surface_mode = "ocr_point_surface"
     if len(marks) < 20 and len(labels) >= 5:
         marks = labels.copy()
         surface_mode = "sparse_contour_labels"
@@ -387,7 +387,7 @@ def run(
         "filtered_depth_marks": int(len(marks)),
         "retained_mark_rate": round(
             len(marks)
-            / max(1, len(raw_marks) if surface_mode == "dense_profile_measurements" else raw_label_count),
+            / max(1, len(raw_marks) if surface_mode == "ocr_point_surface" else raw_label_count),
             4,
         ),
         "fusion": fusion_metrics,

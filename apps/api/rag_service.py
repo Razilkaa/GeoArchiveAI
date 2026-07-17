@@ -397,5 +397,7 @@ class ReportAnswerService:
 
 def load_report_configs(path: Path | None = None) -> dict[str, ReportConfig]:
     config_path = path or Path(__file__).with_name("reports.json")
+    if not config_path.exists():
+        return {}
     raw = json.loads(config_path.read_text(encoding="utf-8"))
     return {report_id: ReportConfig.from_dict(report_id, value) for report_id, value in raw.items()}

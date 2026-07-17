@@ -36,7 +36,7 @@ def services() -> dict[str, Any]:
         "map_digitizer": {
             "status": "ok",
             "pipeline_version": PIPELINE_VERSION,
-            "acceptance_policy": "dense_auto_accept_sparse_review",
+            "acceptance_policy": "trace_preserving_review",
         },
         "ragflow": {"url": settings.ragflow_url},
     }

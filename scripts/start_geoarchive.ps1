@@ -16,7 +16,7 @@ function Test-Http([string]$url) {
     }
 }
 
-$serviceLogs = "$project\runs\services"
+$serviceLogs = "$project\work\logs"
 New-Item -ItemType Directory -Force $serviceLogs | Out-Null
 
 if (-not (Has-ProcessCommand "18080:127\.0\.0\.1:18080")) {

@@ -1,15 +1,19 @@
-# Active report pipeline
+# Обработка отчёта
 
-Здесь находится только код, вызываемый рабочим конвейером.
+`job_worker.py` является единственным оркестратором полного отчёта.
 
-- `batch_intake.py` — регистрация входных фондов и создание manifest.
-- `report_factory.py` — инвентаризация страниц.
-- `page_router.py` — классификация text/graphic/map/table.
-- `factory_runner.py` — GPU OCR, Markdown и RAGFlow ingest.
-- `factory_agents.py` — извлечение структур, карт, результатов и скважин.
-- `job_worker.py` — последовательность стадий и resume/retry.
-- `report_orchestrator.py` — граф специализированных агентов.
-- `build_result_bundle.py` — единый результат для API и UI.
-- `watch_inbox.py` — необязательный watcher; основной путь идёт через FastAPI.
+```text
+batch_intake -> page_router -> OCR/Markdown -> RAGFlow -> map digitizer -> bundle
+```
 
-Одноразовые CV/VLM-эксперименты перенесены в `research/`.
+Основные файлы:
+
+- `batch_intake.py` регистрирует архив;
+- `page_router.py` классифицирует страницы;
+- `factory_runner.py` создаёт OCR Markdown и отправляет его в RAGFlow;
+- `job_worker.py` последовательно запускает стадии и умеет продолжать задачу;
+- `build_result_bundle.py` формирует ответ для API и UI;
+- `factory_agents.py` и `report_orchestrator.py` извлекают сущности отчёта.
+
+Картографический код здесь не находится. Карты всегда передаются в
+`services/map_digitizer/pipeline.py`.

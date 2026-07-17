@@ -20,7 +20,6 @@ from app.services.reports import (
     report_run_dir,
     status_payload,
 )
-from corpus_search import CorpusSearchService
 from rag_service import ReportAnswerService, ReportConfig, load_report_configs
 
 
@@ -58,16 +57,17 @@ def answer_service(report_id: str) -> ReportAnswerService:
     return ReportAnswerService(report_config(report_id))
 
 
-def corpus_search_service() -> CorpusSearchService:
-    report_configs = []
+def global_search_service() -> ReportAnswerService:
+    """Search the shared RAGFlow dataset without a local BM25 fallback."""
     for item in list_reports():
         try:
-            report_configs.append(report_config(str(item["report_id"])))
+            service = ReportAnswerService(report_config(str(item["report_id"])))
         except (KeyError, OSError, ValueError):
             continue
-    if not report_configs:
-        raise KeyError("corpus_search_not_ready")
-    return CorpusSearchService(report_configs)
+        service.ragflow.document_ids = []
+        service.bundle = {"preset_queries": [], "entities": {}}
+        return service
+    raise KeyError("global_search_not_ready")
 
 
 @router.get("/reports")
@@ -175,15 +175,15 @@ async def ask(report_id: str, request: AskRequest) -> dict[str, Any]:
 
 
 @router.post("/search")
-async def search_corpus(request: AskRequest) -> dict[str, Any]:
+async def search_all_reports(request: AskRequest) -> dict[str, Any]:
     question = request.question.strip()
     if not question:
         raise HTTPException(400, "empty_question")
     try:
-        service = corpus_search_service()
+        service = global_search_service()
         return await run_in_threadpool(service.ask, question, request.mode == "live")
     except KeyError as error:
-        raise HTTPException(409, "corpus_search_not_ready") from error
+        raise HTTPException(409, "global_search_not_ready") from error
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
     except Exception as error:

@@ -1,1 +1,0 @@
-"""Map digitizer tests."""
