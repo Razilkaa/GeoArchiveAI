@@ -16,7 +16,31 @@ def percentile(values: list[float], fraction: float) -> float | None:
     return round(float(ordered[index]), 3)
 
 
+def _result_identity(payload: dict) -> str:
+    return str(payload.get("source_sha256") or payload.get("source") or id(payload)).casefold()
+
+
+def _result_preference(payload: dict) -> tuple[int, int, int]:
+    reconstruction = payload.get("stages", {}).get("reconstruction", {}).get("metrics", {})
+    return (
+        int(bool(reconstruction.get("reconstruction_mode"))),
+        int(payload.get("version") or 0),
+        len(payload.get("stages") or {}),
+    )
+
+
+def deduplicate_results(results: list[dict]) -> tuple[list[dict], int]:
+    selected: dict[str, dict] = {}
+    for payload in results:
+        identity = _result_identity(payload)
+        current = selected.get(identity)
+        if current is None or _result_preference(payload) >= _result_preference(current):
+            selected[identity] = payload
+    return list(selected.values()), len(results) - len(selected)
+
+
 def summarize_results(results: list[dict]) -> dict:
+    results, duplicate_count = deduplicate_results(results)
     cases = []
     for payload in results:
         assignment = payload.get("stages", {}).get("assignment", {}).get("metrics", {})
@@ -48,6 +72,7 @@ def summarize_results(results: list[dict]) -> dict:
     reconstructed = [case for case in cases if case["mode"]]
     return {
         "case_count": len(cases),
+        "duplicate_manifests": duplicate_count,
         "status_counts": dict(Counter(case["status"] for case in cases)),
         "mode_counts": dict(Counter(case["mode"] for case in reconstructed)),
         "latency_s": {
@@ -71,6 +96,7 @@ def render_markdown(summary: dict) -> str:
         "# Map digitization benchmark",
         "",
         f"- Cases: **{summary['case_count']}**",
+        f"- Duplicate manifests excluded: **{summary['duplicate_manifests']}**",
         f"- Statuses: **{summary['status_counts']}**",
         f"- Median / P95 latency: **{latency['median']} / {latency['p95']} s**",
         f"- Zero-crossing rate: **{summary['zero_crossing_rate']:.1%}**",

@@ -28,6 +28,32 @@ class BenchmarkTest(unittest.TestCase):
         self.assertEqual(summary["zero_crossing_rate"], 1.0)
         self.assertIn("map.jpg", render_markdown(summary))
 
+    def test_deduplicates_repeated_source_and_prefers_adaptive_result(self):
+        legacy = {
+            "source": "map.jpg",
+            "source_sha256": "same",
+            "status": "accepted",
+            "stages": {"reconstruction": {"metrics": {}}},
+        }
+        adaptive = {
+            "source": "map.jpg",
+            "source_sha256": "same",
+            "status": "review",
+            "version": 1,
+            "stages": {
+                "reconstruction": {
+                    "metrics": {
+                        "reconstruction_mode": "sparse_labels_trace_guided",
+                        "topology": {"crossing_pairs": 0},
+                    }
+                }
+            },
+        }
+        summary = summarize_results([legacy, adaptive])
+        self.assertEqual(summary["case_count"], 1)
+        self.assertEqual(summary["duplicate_manifests"], 1)
+        self.assertEqual(summary["cases"][0]["status"], "review")
+
 
 if __name__ == "__main__":
     unittest.main()
