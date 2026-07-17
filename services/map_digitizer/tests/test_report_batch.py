@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from services.map_digitizer.report_batch import run_report_maps
+from services.map_digitizer.report_batch import report_map_signature, run_report_maps
 
 
 class ReportBatchTest(unittest.TestCase):
@@ -58,6 +58,27 @@ class ReportBatchTest(unittest.TestCase):
         self.assertEqual(result["metrics"]["candidates"], 2)
         self.assertEqual(len(calls), 1)
         self.assertEqual(resumed["metrics"]["reused"], 1)
+        self.assertEqual(resumed["metrics"]["preserved_artifacts"], 0)
+
+    def test_signature_changes_with_routing_or_source_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "map.png"
+            source.write_bytes(b"first")
+            manifest = {
+                "source_root": str(root),
+                "pages": [
+                    {"id": "page:1", "relative_path": source.name, "content_type": "map"}
+                ],
+            }
+            initial = report_map_signature(manifest)
+            manifest["pages"][0]["content_type"] = "chart"
+            rerouted = report_map_signature(manifest)
+            source.write_bytes(b"second-content")
+            changed_source = report_map_signature(manifest)
+
+        self.assertNotEqual(initial, rerouted)
+        self.assertNotEqual(rerouted, changed_source)
 
     def test_chart_candidate_cannot_be_auto_accepted(self):
         with tempfile.TemporaryDirectory() as temporary:

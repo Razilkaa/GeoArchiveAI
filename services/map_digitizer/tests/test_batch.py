@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from services.map_digitizer.batch import case_directory, discover_images, reusable_result
+from services.map_digitizer.pipeline import file_sha256
 
 
 class BatchTest(unittest.TestCase):
@@ -36,6 +37,26 @@ class BatchTest(unittest.TestCase):
                 json.dumps({"source": str(source.resolve()), "status": "failed"}),
                 encoding="utf-8",
             )
+            self.assertIsNone(reusable_result(result, source))
+
+    def test_changed_source_invalidates_hashed_result(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "map.jpg"
+            source.write_bytes(b"first")
+            result = root / "pipeline_result.json"
+            result.write_text(
+                json.dumps(
+                    {
+                        "source": str(source.resolve()),
+                        "source_sha256": file_sha256(source),
+                        "status": "accepted",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            source.write_bytes(b"second")
+
             self.assertIsNone(reusable_result(result, source))
 
 

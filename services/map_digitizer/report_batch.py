@@ -28,17 +28,30 @@ def map_pages(manifest: dict) -> list[dict]:
 
 
 def report_map_signature(manifest: dict) -> str:
+    source_root = Path(str(manifest.get("source_root") or ""))
     records = [
         {
             "id": page.get("id"),
             "relative_path": page.get("relative_path"),
             "pdf_page": page.get("pdf_page"),
+            "content_type": page.get("content_type"),
+            "source_stat": _source_stat(
+                source_root / str(page.get("relative_path") or "")
+            ),
         }
         for page in map_pages(manifest)
     ]
     return hashlib.sha256(
         json.dumps(records, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
+
+
+def _source_stat(path: Path) -> dict | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return {"size_bytes": stat.st_size, "mtime_ns": stat.st_mtime_ns}
 
 
 def _safe_page_id(page_id: str) -> str:
@@ -99,7 +112,13 @@ def run_report_maps(
     output_root.mkdir(parents=True, exist_ok=True)
     jobs_root_resolved = jobs_root.resolve()
     preserved_artifacts = []
+    generated_names = {"source_map", "surface_preview", "pixel_grid", "pixel_contours"}
     for item in existing_result.get("artifacts", []):
+        if (
+            existing_result.get("producer") == "services.map_digitizer.report_batch"
+            and item.get("name") in generated_names
+        ):
+            continue
         path = Path(str(item.get("path") or ""))
         if not path.exists():
             continue

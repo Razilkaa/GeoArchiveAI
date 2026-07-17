@@ -194,12 +194,15 @@ def run_pipeline(
     ocr_client: Callable[[Path, str, float], dict] = request_ocr,
 ) -> dict:
     image_path = image_path.resolve()
+    source_stat = image_path.stat()
     output_dir.mkdir(parents=True, exist_ok=True)
     result_path = output_dir / "pipeline_result.json"
     result = {
         "version": 1,
         "source": str(image_path),
         "source_sha256": file_sha256(image_path),
+        "source_size_bytes": source_stat.st_size,
+        "source_mtime_ns": source_stat.st_mtime_ns,
         "status": "running",
         "stages": {},
         "artifacts": {},

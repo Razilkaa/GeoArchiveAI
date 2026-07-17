@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from services.map_digitizer.benchmark import summarize_results
-from services.map_digitizer.pipeline import run_pipeline
+from services.map_digitizer.pipeline import file_sha256, run_pipeline
 
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
@@ -41,6 +41,15 @@ def reusable_result(path: Path, source: Path) -> dict | None:
     if payload.get("status") not in TERMINAL_STATUSES:
         return None
     if Path(payload.get("source", "")).resolve() != source.resolve():
+        return None
+    source_stat = source.stat()
+    if (
+        payload.get("source_size_bytes") == source_stat.st_size
+        and payload.get("source_mtime_ns") == source_stat.st_mtime_ns
+    ):
+        return payload
+    expected_hash = payload.get("source_sha256")
+    if expected_hash and expected_hash != file_sha256(source):
         return None
     return payload
 
