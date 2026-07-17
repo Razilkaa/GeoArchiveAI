@@ -21,7 +21,8 @@ BMP = Path(r"C:\FINAM\Conference\384092\Графика\Том 2, 3 (выборк
 STEP = 0.2
 
 va = json.loads((TR / "valued_isolines_23.json").read_text(encoding="utf-8"))
-iso_data = json.loads((TR / "isolines.json").read_text(encoding="utf-8"))
+iso_path = TR / ("isolines_clean.json" if (TR / "isolines_clean.json").exists() else "isolines.json")
+iso_data = json.loads(iso_path.read_text(encoding="utf-8"))
 polylines = [np.array(p, float) for p in iso_data["polylines_xy"]]
 readings = [json.loads(l) for l in (DET / "readings.jsonl").read_text(encoding="utf-8").splitlines()]
 labeled = {int(k): v for k, v in va["values"].items()}
@@ -91,8 +92,36 @@ for i, p in enumerate(polylines):
         from_surface[i] = -abs(snapped)
         verdict[i] = "combo"
 from collections import Counter as _C
+
+# ---- pass 2: propagate to remaining gray curves with neighbour-order check ----
+def median_dist(pa, pb_tree):
+    samp = pa[:: max(1, len(pa) // 30)]
+    d, _ = pb_tree.query(samp)
+    return float(np.median(d))
+
+valued_now = {**{i: abs(v) for i, v in labeled.items()},
+              **{i: abs(v) for i, v in from_surface.items()}}
+valued_trees = {i: cKDTree(polylines[i]) for i in valued_now}
+propagated = {}
+for i, p in enumerate(polylines):
+    if i in leaks or i in valued_now or i not in surf_check:
+        continue
+    sc = surf_check[i]
+    if sc["std"] > 0.30 or sc["coverage"] < 0.30:
+        continue
+    cand = abs(sc["snapped"])
+    dists = {j: median_dist(p, t) for j, t in valued_trees.items()}
+    if not dists:
+        continue
+    jmin = min(dists, key=dists.get)
+    # порядок пучка: сосед не дальше 2 шагов по значению и физически рядом
+    if dists[jmin] <= 600 and abs(cand - valued_now[jmin]) <= 2 * STEP + 1e-6:
+        propagated[i] = -cand
+        verdict[i] = "combo"
+from_surface.update(propagated)
+print("pass2 propagated:", len(propagated))
 print("verdicts:", dict(_C(verdict.values())))
-print("gray curves valued from surface:", len(from_surface))
+print("gray curves valued from surface total:", len(from_surface))
 
 # ---- structure digits (loosened) ----
 structs = []

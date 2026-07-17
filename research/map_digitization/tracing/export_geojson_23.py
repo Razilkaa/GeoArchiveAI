@@ -7,7 +7,8 @@ import numpy as np
 
 TR = Path(r"C:\FINAM\Conference\pipeline\tracing\out\23")
 
-iso = json.loads((TR / "isolines.json").read_text(encoding="utf-8"))
+iso_path = TR / ("isolines_clean.json" if (TR / "isolines_clean.json").exists() else "isolines.json")
+iso = json.loads(iso_path.read_text(encoding="utf-8"))
 va = json.loads((TR / "valued_isolines_23.json").read_text(encoding="utf-8"))
 cc = json.loads((TR / "crosscheck_23.json").read_text(encoding="utf-8"))
 

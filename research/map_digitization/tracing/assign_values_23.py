@@ -24,7 +24,8 @@ RE_STRUCT = re.compile(r"^[12]$")
 CONTOUR_STEP = 0.2   # km; TODO: брать из текста отчёта (раздел о картопостроении) через RAG
 SNAP_TOL = 0.06      # km: label deviating from step-multiple less than this -> snap
 
-iso_data = json.loads((TR / "isolines.json").read_text(encoding="utf-8"))
+iso_path = TR / ("isolines_clean.json" if (TR / "isolines_clean.json").exists() else "isolines.json")
+iso_data = json.loads(iso_path.read_text(encoding="utf-8"))
 polylines = [np.array(p, float) for p in iso_data["polylines_xy"]]
 readings = [json.loads(l) for l in (DET / "readings.jsonl").read_text(encoding="utf-8").splitlines()]
 print("polylines:", len(polylines), " readings:", len(readings))
