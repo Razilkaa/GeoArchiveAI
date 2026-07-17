@@ -22,6 +22,7 @@ from services.map_digitizer.trace_guided_surface import run as reconstruct_trace
 from services.map_digitizer.trace_map_isolines import trace
 
 Image.MAX_IMAGE_PIXELS = None
+PIPELINE_VERSION = 2
 
 
 def file_sha256(path: Path) -> str:
@@ -110,6 +111,8 @@ def quality_decision(assignment: dict, reconstruction: dict) -> dict:
         and int(assignment.get("profile_id_labels", 0)) < 10
     ):
         reasons.append("weak_profile_network_evidence")
+    if reconstruction.get("reconstruction_mode") == "sparse_labels_trace_guided":
+        reasons.append("sparse_reconstruction_requires_review")
     label_crosscheck = (
         reconstruction.get("preliminary_surface", {}).get("label_crosscheck", {})
     )
@@ -198,7 +201,7 @@ def run_pipeline(
     output_dir.mkdir(parents=True, exist_ok=True)
     result_path = output_dir / "pipeline_result.json"
     result = {
-        "version": 1,
+        "version": PIPELINE_VERSION,
         "source": str(image_path),
         "source_sha256": file_sha256(image_path),
         "source_size_bytes": source_stat.st_size,

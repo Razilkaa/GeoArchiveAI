@@ -241,6 +241,38 @@ class ApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_maps_endpoint_hides_rejected_candidate(self):
+        directory = self.runs / "375392"
+        source = directory / "overview.jpg"
+        source.write_bytes(b"overview")
+        manifest = json.loads((directory / "job.json").read_text(encoding="utf-8"))
+        manifest["pages"] = [
+            {"id": "page:1", "relative_path": source.name, "content_type": "map"}
+        ]
+        manifest["source_root"] = str(directory)
+        (directory / "job.json").write_text(json.dumps(manifest), encoding="utf-8")
+        map_agent = directory / "map_agent"
+        map_agent.mkdir()
+        (map_agent / "result.json").write_text(
+            json.dumps(
+                {
+                    "jobs": [{"page_id": "page:1", "status": "not_applicable"}],
+                    "artifacts": [
+                        {
+                            "name": "source_map",
+                            "page_id": "page:1",
+                            "path": str(source),
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        payload = self.client.get("/api/reports/375392/maps").json()
+
+        self.assertEqual(payload["sources"], [])
+
     @patch("app.routers.reports.reconcile_now")
     def test_scan_registers_and_starts_reports(self, reconcile):
         reconcile.return_value = {

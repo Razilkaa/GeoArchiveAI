@@ -50,6 +50,7 @@ def summarize_results(results: list[dict]) -> dict:
         cases.append(
             {
                 "source": payload.get("source"),
+                "pipeline_version": payload.get("version"),
                 "status": payload.get("status"),
                 "latency_s": payload.get("total_latency_s"),
                 "interval_km": assignment.get("contour_interval_km"),
@@ -80,6 +81,9 @@ def summarize_results(results: list[dict]) -> dict:
         "case_count": len(cases),
         "duplicate_manifests": duplicate_count,
         "status_counts": dict(Counter(case["status"] for case in cases)),
+        "pipeline_version_counts": dict(
+            Counter(str(case["pipeline_version"] or "unknown") for case in cases)
+        ),
         "review_reason_counts": dict(
             Counter(reason for case in cases for reason in case["reasons"])
         ),
@@ -107,6 +111,7 @@ def render_markdown(summary: dict) -> str:
         f"- Cases: **{summary['case_count']}**",
         f"- Duplicate manifests excluded: **{summary['duplicate_manifests']}**",
         f"- Statuses: **{summary['status_counts']}**",
+        f"- Pipeline versions: **{summary['pipeline_version_counts']}**",
         f"- Review reasons: **{summary['review_reason_counts']}**",
         f"- Median / P95 latency: **{latency['median']} / {latency['p95']} s**",
         f"- Zero-crossing rate: **{summary['zero_crossing_rate']:.1%}**",

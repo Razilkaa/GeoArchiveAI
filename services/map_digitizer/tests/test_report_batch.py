@@ -8,6 +8,7 @@ from pathlib import Path
 from PIL import Image
 
 from services.map_digitizer.report_batch import report_map_signature, run_report_maps
+from services.map_digitizer.pipeline import PIPELINE_VERSION
 
 
 class ReportBatchTest(unittest.TestCase):
@@ -37,6 +38,7 @@ class ReportBatchTest(unittest.TestCase):
                 preview = output_dir / "preview.png"
                 preview.write_bytes(b"png")
                 result = {
+                    "version": PIPELINE_VERSION,
                     "status": "accepted",
                     "source": str(image_path.resolve()),
                     "quality": {"status": "accepted"},
@@ -54,8 +56,10 @@ class ReportBatchTest(unittest.TestCase):
 
         self.assertEqual(len(calls), 1)
         self.assertEqual(result["quality_status"], "accepted")
+        self.assertEqual(result["pipeline_version"], PIPELINE_VERSION)
         self.assertEqual(result["metrics"]["duplicates"], 1)
         self.assertEqual(result["metrics"]["candidates"], 2)
+        self.assertEqual(result["artifacts"][0]["media_type"], "image/png")
         self.assertEqual(len(calls), 1)
         self.assertEqual(resumed["metrics"]["reused"], 1)
         self.assertEqual(resumed["metrics"]["preserved_artifacts"], 0)

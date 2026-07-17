@@ -12,11 +12,19 @@ import numpy as np
 from PIL import Image
 
 from services.map_digitizer.batch import reusable_result
-from services.map_digitizer.pipeline import run_pipeline
+from services.map_digitizer.pipeline import PIPELINE_VERSION, run_pipeline
 
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
 CANDIDATE_CONTENT_TYPES = {"map", "chart"}
+IMAGE_MEDIA_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".bmp": "image/bmp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+}
 
 
 def map_pages(manifest: dict) -> list[dict]:
@@ -41,8 +49,9 @@ def report_map_signature(manifest: dict) -> str:
         }
         for page in map_pages(manifest)
     ]
+    signature_payload = {"pipeline_version": PIPELINE_VERSION, "pages": records}
     return hashlib.sha256(
-        json.dumps(records, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        json.dumps(signature_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
 
 
@@ -153,6 +162,7 @@ def run_report_maps(
         ]
         payload = {
             "producer": "services.map_digitizer.report_batch",
+            "pipeline_version": PIPELINE_VERSION,
             "status": status,
             "quality_status": quality_status,
             "manifest_signature": report_map_signature(manifest),
@@ -222,7 +232,9 @@ def run_report_maps(
                     "name": "source_map",
                     "label": f"Исходная карта · {source.name}",
                     "path": str(source),
-                    "media_type": "image/png" if source.suffix.casefold() == ".png" else "image/jpeg",
+                    "media_type": IMAGE_MEDIA_TYPES.get(
+                        source.suffix.casefold(), "application/octet-stream"
+                    ),
                     "page_id": page_id,
                 }
             )

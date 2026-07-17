@@ -117,6 +117,28 @@ class PipelineQualityTest(unittest.TestCase):
         decision = quality_decision(assignment, reconstruction)
         self.assertIn("weak_profile_network_evidence", decision["reasons"])
 
+    def test_sparse_surface_always_requires_semantic_review(self):
+        assignment = {
+            "contour_interval_km": 0.1,
+            "confident_polylines": 20,
+            "conflicting_polylines": 1,
+            "profile_id_labels": 30,
+        }
+        reconstruction = {
+            "reconstruction_mode": "sparse_labels_trace_guided",
+            "accepted_traces": 100,
+            "grid_quality": {
+                "constraint_p95_abs_error_m": 2.0,
+                "value_range_preserved": True,
+            },
+            "topology": {"crossing_pairs": 0, "levels": 15, "closed_segments": 2},
+        }
+
+        decision = quality_decision(assignment, reconstruction)
+
+        self.assertEqual(decision["status"], "review")
+        self.assertIn("sparse_reconstruction_requires_review", decision["reasons"])
+
     def test_high_direct_contour_conflict_rate_requires_review(self):
         assignment = {
             "contour_interval_km": 0.1,

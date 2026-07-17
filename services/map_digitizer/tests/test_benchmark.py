@@ -8,6 +8,7 @@ from services.map_digitizer.benchmark import render_markdown, summarize_results
 class BenchmarkTest(unittest.TestCase):
     def test_summarizes_status_latency_and_topology(self):
         result = {
+            "version": 2,
             "source": "map.jpg",
             "status": "accepted",
             "total_latency_s": 12.0,
@@ -29,6 +30,7 @@ class BenchmarkTest(unittest.TestCase):
         }
         summary = summarize_results([result])
         self.assertEqual(summary["status_counts"], {"accepted": 1})
+        self.assertEqual(summary["pipeline_version_counts"], {"2": 1})
         self.assertEqual(summary["zero_crossing_rate"], 1.0)
         self.assertEqual(
             summary["review_reason_counts"], {"low_label_surface_agreement": 1}

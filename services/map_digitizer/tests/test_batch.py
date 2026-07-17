@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from services.map_digitizer.batch import case_directory, discover_images, reusable_result
-from services.map_digitizer.pipeline import file_sha256
+from services.map_digitizer.pipeline import PIPELINE_VERSION, file_sha256
 
 
 class BatchTest(unittest.TestCase):
@@ -29,12 +29,24 @@ class BatchTest(unittest.TestCase):
             source.touch()
             result = root / "pipeline_result.json"
             result.write_text(
-                json.dumps({"source": str(source.resolve()), "status": "accepted"}),
+                json.dumps(
+                    {
+                        "version": PIPELINE_VERSION,
+                        "source": str(source.resolve()),
+                        "status": "accepted",
+                    }
+                ),
                 encoding="utf-8",
             )
             self.assertIsNotNone(reusable_result(result, source))
             result.write_text(
-                json.dumps({"source": str(source.resolve()), "status": "failed"}),
+                json.dumps(
+                    {
+                        "version": PIPELINE_VERSION,
+                        "source": str(source.resolve()),
+                        "status": "failed",
+                    }
+                ),
                 encoding="utf-8",
             )
             self.assertIsNone(reusable_result(result, source))
@@ -49,6 +61,7 @@ class BatchTest(unittest.TestCase):
                 json.dumps(
                     {
                         "source": str(source.resolve()),
+                        "version": PIPELINE_VERSION,
                         "source_sha256": file_sha256(source),
                         "status": "accepted",
                     }
@@ -56,6 +69,25 @@ class BatchTest(unittest.TestCase):
                 encoding="utf-8",
             )
             source.write_bytes(b"second")
+
+            self.assertIsNone(reusable_result(result, source))
+
+    def test_old_pipeline_version_is_not_reused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "map.jpg"
+            source.write_bytes(b"map")
+            result = root / "pipeline_result.json"
+            result.write_text(
+                json.dumps(
+                    {
+                        "version": PIPELINE_VERSION - 1,
+                        "source": str(source.resolve()),
+                        "status": "accepted",
+                    }
+                ),
+                encoding="utf-8",
+            )
 
             self.assertIsNone(reusable_result(result, source))
 

@@ -120,9 +120,20 @@ def map_payload(report_id: str) -> dict[str, Any]:
     directory = report_run_dir(report_id)
     manifest = read_json(directory / "job.json", {})
     source_root = Path(str(manifest.get("source_root") or ""))
+    result = read_json(directory / "map_agent" / "result.json", {})
+    processed_status = {
+        str(job.get("page_id")): str(job.get("status"))
+        for job in result.get("jobs", [])
+    }
     sources = []
     for page in manifest.get("pages", []):
         if page.get("content_type") != "map":
+            continue
+        if processed_status.get(str(page.get("id"))) in {
+            "not_applicable",
+            "failed",
+            "duplicate",
+        }:
             continue
         path = source_root / str(page.get("relative_path") or "")
         sources.append(
@@ -135,10 +146,15 @@ def map_payload(report_id: str) -> dict[str, Any]:
             }
         )
 
-    result = read_json(directory / "map_agent" / "result.json", {})
     digitized = []
     for artifact in result.get("artifacts", []):
         if artifact.get("name") == "source_map":
+            if processed_status.get(str(artifact.get("page_id"))) in {
+                "not_applicable",
+                "failed",
+                "duplicate",
+            }:
+                continue
             path = Path(str(artifact.get("path") or ""))
             if path.exists() and not any(item["path"] == str(path) for item in sources):
                 sources.insert(
