@@ -81,6 +81,20 @@ GPU-сервисом, а RAGFlow остаётся отдельным храни�
 перепроецирования. Текущий результат имеет статус `REVIEW`, пока профильная
 геопривязка не подтверждена дополнительной контрольной линией.
 
+## Map API additions
+
+- `POST /api/reports/{report_id}/maps/run` reruns map discovery and digitization.
+- `GET /api/reports/{report_id}/maps/artifacts/{artifact_id}` downloads a report
+  source map, preview, pixel grid or GeoJSON artifact.
+- `POST /api/maps/jobs` uploads one image for standalone digitization.
+- `GET /api/maps/jobs/{job_id}` returns status, QC and stable artifact URLs.
+- `POST /api/maps/jobs/{job_id}/georeference` exports a CRS-aware CPS-3 grid.
+- `GET /api/maps/jobs/{job_id}/artifacts/{artifact_name}` downloads a generated
+  standalone artifact.
+
+Concurrency is bounded by `MAP_MAX_JOBS` (default 2). Deployment state is exposed
+at `/api/services`, including the map pipeline version and acceptance policy.
+
 ## RAG benchmark
 
 Эталонные вопросы хранятся в `benchmarks/rag/`. Проверка разделяет потери по
