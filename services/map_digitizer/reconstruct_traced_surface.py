@@ -18,6 +18,7 @@ from services.map_digitizer.export_cps3_grid import (
     contour_topology,
     extract_surface_contours,
 )
+from services.map_digitizer.contour_cleanup import remove_unsupported_closed_contours
 from services.map_digitizer.trace_guided_surface import densify, prune_crossing_constraints
 
 matplotlib.use("Agg")
@@ -154,6 +155,13 @@ def run(
 
     final_constraints = [item for item in constraints if item["accepted"]]
     reconstructed = extract_surface_contours(grid, interval=interval * 1000.0)
+    grid_spacing = float(np.median(np.diff(grid.x))) if len(grid.x) > 1 else 1.0
+    reconstructed, contour_cleanup = remove_unsupported_closed_contours(
+        reconstructed,
+        contour_frame,
+        interval_m=interval * 1000.0,
+        support_distance=grid_spacing * 4.0,
+    )
     topology = contour_topology(reconstructed)
     output_dir.mkdir(parents=True, exist_ok=True)
     source_frame = gpd.GeoDataFrame(
@@ -206,6 +214,7 @@ def run(
         "iterations": iteration_metrics,
         "grid_quality": quality,
         "topology": topology,
+        "contour_cleanup": contour_cleanup,
         "files": {"source_contours": str(source_path), "final_contours": str(final_path), "grid": str(grid_path), "preview": str(preview)},
     }
     (output_dir / "surface_metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")

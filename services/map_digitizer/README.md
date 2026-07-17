@@ -46,6 +46,12 @@ python -m services.map_digitizer.benchmark "runs/map_batch" `
    - `sparse_labels_trace_guided` для карт только с подписями изолиний.
 5. `quality` проверяет ошибки ограничений, пересечения, диапазон и лишние замыкания.
 
+Large scans are OCRed as overlapping tiles when they exceed 40 megapixels. Tile
+coordinates are restored to the source image and overlap duplicates are merged,
+which bounds GPU memory instead of sending one oversized tensor. Reconstructed
+surfaces reject short unlabelled trace fragments and isolated closed contours
+without source or adjacent-level support.
+
 ## Результат
 
 Главный контракт находится в `pipeline_result.json`:

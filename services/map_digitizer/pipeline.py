@@ -4,13 +4,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import mimetypes
 import re
 import time
 from pathlib import Path
 from typing import Callable
 
-import requests
 from PIL import Image
 
 from services.map_digitizer.assign_contour_values import (
@@ -18,6 +16,7 @@ from services.map_digitizer.assign_contour_values import (
     run as assign_values,
 )
 from services.map_digitizer.depth_mark_surface import run as build_depth_surface
+from services.map_digitizer.ocr_client import request_ocr
 from services.map_digitizer.reconstruct_traced_surface import run as reconstruct_surface
 from services.map_digitizer.trace_guided_surface import run as reconstruct_trace_guided
 from services.map_digitizer.trace_map_isolines import trace
@@ -31,23 +30,6 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def request_ocr(image_path: Path, api_url: str, timeout: float = 120.0) -> dict:
-    session = requests.Session()
-    session.trust_env = False
-    mime_type = mimetypes.guess_type(image_path.name)[0] or "application/octet-stream"
-    with image_path.open("rb") as source:
-        response = session.post(
-            f"{api_url.rstrip('/')}/v1/ocr",
-            files={"file": (image_path.name, source, mime_type)},
-            timeout=timeout,
-        )
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload.get("lines"), list):
-        raise ValueError("OCR response has no lines array")
-    return payload
 
 
 def assess_ocr_eligibility(
@@ -248,21 +230,6 @@ def run_pipeline(
         ),
     )
     result["stages"]["assignment"]["metrics"] = assignment
-    if (
-        int(assignment.get("confident_polylines", 0)) < 3
-        and int(assignment.get("profile_measurements", 0)) < 20
-    ):
-        result["status"] = "not_applicable"
-        result["quality"] = {
-            "status": "not_applicable",
-            "reasons": ["insufficient_traced_contour_support"],
-        }
-        result["total_latency_s"] = round(
-            sum(float(stage["latency_s"]) for stage in result["stages"].values()), 3
-        )
-        result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-        return result
-
     reconstruction_dir = output_dir / "surface"
     reconstruction = execute(
         "reconstruction",

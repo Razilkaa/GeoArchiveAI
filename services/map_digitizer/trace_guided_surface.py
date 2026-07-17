@@ -14,6 +14,7 @@ from scipy.interpolate import RegularGridInterpolator
 from shapely.geometry import LineString
 
 from services.map_digitizer.assign_contour_values import assign_values, straightness
+from services.map_digitizer.contour_cleanup import remove_unsupported_closed_contours
 from services.map_digitizer.depth_mark_surface import image_scale, load_ocr_readings
 from services.map_digitizer.export_cps3_grid import (
     build_harmonic_grid,
@@ -42,6 +43,7 @@ def assign_traced_values(
     minimum_coverage: float = 0.2,
     maximum_spread: float = 0.4,
     maximum_residual: float = 0.12,
+    minimum_length: float = 0.0,
 ) -> list[dict]:
     assignments = []
     for index, points in enumerate(polylines):
@@ -65,6 +67,7 @@ def assign_traced_values(
             snapped = spread = residual = None
         accepted = bool(
             not profile_suspect
+            and length >= minimum_length
             and coverage >= minimum_coverage
             and residual is not None
             and residual <= maximum_residual
@@ -76,6 +79,7 @@ def assign_traced_values(
                 "accepted": accepted,
                 "profile_suspect": profile_suspect,
                 "coverage": round(coverage, 4),
+                "length_px": round(length, 2),
                 "value_km": -round(float(snapped), 3) if accepted else None,
                 "spread_km": round(float(spread), 4) if spread is not None else None,
                 "residual_km": round(float(residual), 4) if residual is not None else None,
@@ -136,7 +140,13 @@ def run(
     interpolator = RegularGridInterpolator(
         (y, x), np.abs(z), bounds_error=False, fill_value=np.nan
     )
-    assignments = assign_traced_values(polylines, interpolator, interval=interval)
+    minimum_trace_length = max(60.0, min(target_size) * 0.015)
+    assignments = assign_traced_values(
+        polylines,
+        interpolator,
+        interval=interval,
+        minimum_length=minimum_trace_length,
+    )
     finite_surface = np.abs(z[np.isfinite(z)])
     direct_low = -float(finite_surface.max()) - interval * 2
     direct_high = -float(finite_surface.min()) + interval * 2
@@ -201,6 +211,13 @@ def run(
         support_contours=support,
     )
     reconstructed = extract_surface_contours(grid, interval=interval * 1000.0)
+    grid_spacing = float(np.median(np.diff(grid.x))) if len(grid.x) > 1 else 1.0
+    reconstructed, contour_cleanup = remove_unsupported_closed_contours(
+        reconstructed,
+        contours,
+        interval_m=interval * 1000.0,
+        support_distance=grid_spacing * 4.0,
+    )
     topology = contour_topology(reconstructed)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -244,6 +261,7 @@ def run(
         "accepted_traces": len(accepted),
         "accepted_rate": round(len(accepted) / max(1, len(assignments)), 4),
         "profile_suspects": sum(item["profile_suspect"] for item in assignments),
+        "minimum_trace_length_px": round(minimum_trace_length, 2),
         "direct_labels": len(direct_labels),
         "crossing_rejections": crossing_rejections,
         "trace_image_size": list(trace_size),
@@ -255,6 +273,7 @@ def run(
         },
         "grid_quality": grid_quality,
         "topology": topology,
+        "contour_cleanup": contour_cleanup,
         "files": {
             "source_contours": str(source_geojson),
             "final_contours": str(final_geojson),
