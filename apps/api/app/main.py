@@ -1,10 +1,16 @@
 import asyncio
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.routers import maps, reports, system
 from app.config import settings
+
+project_root = str(settings.project_root)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from app.routers import maps, reports, system
 from app.services.automation import InboxMonitor, stop_monitor
 
 
