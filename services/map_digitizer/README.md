@@ -42,9 +42,17 @@ python -m services.map_digitizer.benchmark "runs/map_batch" `
 2. `trace` отделяет профили, текст и изолинии и сшивает разрывы.
 3. `assignment` определяет сечение, присваивает значения и фильтрует OCR-выбросы.
 4. `reconstruction` автоматически выбирает режим:
-   - `dense_profile_measurements` для карт с плотными отметками на профилях;
+   - `dense_profile_measurements` для карт минимум с 80 пригодными отметками на
+     профилях;
    - `sparse_labels_trace_guided` для карт только с подписями изолиний.
 5. `quality` проверяет ошибки ограничений, пересечения, диапазон и лишние замыкания.
+
+Sparse reconstruction is deliberately always marked `review`: a deterministic
+line tracer cannot prove that several contour families on one sheet belong to
+the same geological horizon. Dense outputs can be auto-accepted only after the
+remaining numerical and topology checks pass. Pipeline version changes
+invalidate geometry results automatically while retaining the expensive OCR
+cache.
 
 Large scans are downscaled to a 4000-pixel maximum side before OCR when they
 exceed 40 megapixels. Coordinates are restored to the source image; overlapping
@@ -63,7 +71,7 @@ routing and preserves external/manual georeferenced artifacts on reruns.
 
 Главный контракт находится в `pipeline_result.json`:
 
-- `status`: `accepted`, `review` или `failed`;
+- `status`: `accepted`, `review`, `not_applicable` или `failed`;
 - `stages`: время и метрики каждого этапа;
 - `quality.reasons`: причины ручной или модельной проверки;
 - `artifacts.surface_preview`: сравнение исходника и результата;
