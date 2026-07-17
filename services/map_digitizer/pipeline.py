@@ -82,6 +82,11 @@ def quality_decision(assignment: dict, reconstruction: dict) -> dict:
     reasons = []
     if assignment["confident_polylines"] < 3:
         reasons.append("fewer_than_3_direct_contours")
+    confident = int(assignment.get("confident_polylines", 0))
+    conflicting = int(assignment.get("conflicting_polylines", 0))
+    direct_total = confident + conflicting
+    if conflicting >= 3 and conflicting / max(1, direct_total) > 0.35:
+        reasons.append("high_direct_contour_conflict_rate")
     if reconstruction["topology"]["crossing_pairs"]:
         reasons.append("contour_crossings")
     topology = reconstruction["topology"]
@@ -105,6 +110,14 @@ def quality_decision(assignment: dict, reconstruction: dict) -> dict:
         and int(assignment.get("profile_id_labels", 0)) < 10
     ):
         reasons.append("weak_profile_network_evidence")
+    label_crosscheck = (
+        reconstruction.get("preliminary_surface", {}).get("label_crosscheck", {})
+    )
+    if (
+        int(label_crosscheck.get("compared", 0)) >= 10
+        and float(label_crosscheck.get("within_one_interval_rate", 1.0)) < 0.6
+    ):
+        reasons.append("low_label_surface_agreement")
     if p95_error > interval_m * 0.5:
         reasons.append("constraint_error_exceeds_half_interval")
     if not reconstruction["grid_quality"]["value_range_preserved"]:
@@ -116,6 +129,8 @@ def quality_decision(assignment: dict, reconstruction: dict) -> dict:
         "status": "accepted" if not reasons else "review",
         "reasons": reasons,
         "constraint_p95_fraction_of_interval": round(p95_error / interval_m, 4),
+        "direct_contour_conflict_rate": round(conflicting / max(1, direct_total), 4),
+        "label_surface_agreement": label_crosscheck.get("within_one_interval_rate"),
     }
 
 

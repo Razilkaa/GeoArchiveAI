@@ -21,11 +21,19 @@ class BenchmarkTest(unittest.TestCase):
                     }
                 },
             },
-            "quality": {"reasons": []},
+            "quality": {
+                "reasons": ["low_label_surface_agreement"],
+                "direct_contour_conflict_rate": 0.2,
+                "label_surface_agreement": 0.8,
+            },
         }
         summary = summarize_results([result])
         self.assertEqual(summary["status_counts"], {"accepted": 1})
         self.assertEqual(summary["zero_crossing_rate"], 1.0)
+        self.assertEqual(
+            summary["review_reason_counts"], {"low_label_surface_agreement": 1}
+        )
+        self.assertEqual(summary["cases"][0]["direct_conflict_rate"], 0.2)
         self.assertIn("map.jpg", render_markdown(summary))
 
     def test_deduplicates_repeated_source_and_prefers_adaptive_result(self):

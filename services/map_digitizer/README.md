@@ -100,7 +100,15 @@ The same workflow is exposed by FastAPI:
 
 - `POST /api/maps/jobs` uploads an image and starts digitization;
 - `GET /api/maps/jobs/{job_id}` returns stage, quality and artifact metadata;
+- `GET /api/maps/jobs/{job_id}/artifacts/{artifact_name}` downloads a generated
+  preview, pixel grid, GeoJSON, CPS-3, XYZ or PRJ file;
 - `POST /api/maps/jobs/{job_id}/georeference` exports a CRS-aware grid.
+- `POST /api/reports/{report_id}/maps/run` reruns map discovery and digitization
+  for an already registered report, then rebuilds its result bundle.
+
+Artifact names are stable API identifiers: `surface_preview`, `pixel_grid`,
+`pixel_contours`, `cps3`, `xyz`, `prj` and `georeference_metadata`. The API never
+serves arbitrary paths from a job manifest.
 
 Run the API from `apps/api` and inspect the contract at `/docs`.
 

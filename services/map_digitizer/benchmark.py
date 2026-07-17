@@ -65,6 +65,12 @@ def summarize_results(results: list[dict]) -> dict:
                 "levels": topology.get("levels"),
                 "closed_segments": topology.get("closed_segments"),
                 "crossings": topology.get("crossing_pairs"),
+                "direct_conflict_rate": (payload.get("quality") or {}).get(
+                    "direct_contour_conflict_rate"
+                ),
+                "label_surface_agreement": (payload.get("quality") or {}).get(
+                    "label_surface_agreement"
+                ),
                 "reasons": (payload.get("quality") or {}).get("reasons", []),
             }
         )
@@ -74,6 +80,9 @@ def summarize_results(results: list[dict]) -> dict:
         "case_count": len(cases),
         "duplicate_manifests": duplicate_count,
         "status_counts": dict(Counter(case["status"] for case in cases)),
+        "review_reason_counts": dict(
+            Counter(reason for case in cases for reason in case["reasons"])
+        ),
         "mode_counts": dict(Counter(case["mode"] for case in reconstructed)),
         "latency_s": {
             "median": round(statistics.median(latencies), 3) if latencies else None,
@@ -98,12 +107,13 @@ def render_markdown(summary: dict) -> str:
         f"- Cases: **{summary['case_count']}**",
         f"- Duplicate manifests excluded: **{summary['duplicate_manifests']}**",
         f"- Statuses: **{summary['status_counts']}**",
+        f"- Review reasons: **{summary['review_reason_counts']}**",
         f"- Median / P95 latency: **{latency['median']} / {latency['p95']} s**",
         f"- Zero-crossing rate: **{summary['zero_crossing_rate']:.1%}**",
         f"- Auto-accepted rate: **{summary['accepted_rate']:.1%}**",
         "",
-        "| Source | Status | Mode | Step, km | P95, m | Levels | Closed | Crossings | Time, s |",
-        "|---|---:|---|---:|---:|---:|---:|---:|---:|",
+        "| Source | Status | Mode | Step, km | P95, m | Conflict | Agreement | Levels | Closed | Crossings | Time, s |",
+        "|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for case in summary["cases"]:
         source = Path(case["source"]).name if case["source"] else "-"
@@ -111,6 +121,8 @@ def render_markdown(summary: dict) -> str:
             f"| {source} | {case['status']} | {case['mode'] or '-'} | "
             f"{case['interval_km'] if case['interval_km'] is not None else '-'} | "
             f"{round(case['constraint_p95_m'], 2) if case['constraint_p95_m'] is not None else '-'} | "
+            f"{round(case['direct_conflict_rate'], 2) if case['direct_conflict_rate'] is not None else '-'} | "
+            f"{round(case['label_surface_agreement'], 2) if case['label_surface_agreement'] is not None else '-'} | "
             f"{case['levels'] if case['levels'] is not None else '-'} | "
             f"{case['closed_segments'] if case['closed_segments'] is not None else '-'} | "
             f"{case['crossings'] if case['crossings'] is not None else '-'} | "

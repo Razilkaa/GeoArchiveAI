@@ -117,6 +117,55 @@ class PipelineQualityTest(unittest.TestCase):
         decision = quality_decision(assignment, reconstruction)
         self.assertIn("weak_profile_network_evidence", decision["reasons"])
 
+    def test_high_direct_contour_conflict_rate_requires_review(self):
+        assignment = {
+            "contour_interval_km": 0.1,
+            "confident_polylines": 8,
+            "conflicting_polylines": 6,
+            "profile_id_labels": 20,
+        }
+        reconstruction = {
+            "reconstruction_mode": "sparse_labels_trace_guided",
+            "accepted_traces": 50,
+            "grid_quality": {
+                "constraint_p95_abs_error_m": 5.0,
+                "value_range_preserved": True,
+            },
+            "topology": {"crossing_pairs": 0, "levels": 10, "closed_segments": 2},
+        }
+
+        decision = quality_decision(assignment, reconstruction)
+
+        self.assertEqual(decision["status"], "review")
+        self.assertIn("high_direct_contour_conflict_rate", decision["reasons"])
+        self.assertEqual(decision["direct_contour_conflict_rate"], 0.4286)
+
+    def test_low_label_surface_agreement_requires_review(self):
+        assignment = {
+            "contour_interval_km": 0.1,
+            "confident_polylines": 8,
+            "conflicting_polylines": 1,
+            "profile_id_labels": 20,
+        }
+        reconstruction = {
+            "reconstruction_mode": "sparse_labels_trace_guided",
+            "accepted_traces": 50,
+            "grid_quality": {
+                "constraint_p95_abs_error_m": 5.0,
+                "value_range_preserved": True,
+            },
+            "topology": {"crossing_pairs": 0, "levels": 10, "closed_segments": 2},
+            "preliminary_surface": {
+                "label_crosscheck": {"compared": 23, "within_one_interval_rate": 0.43}
+            },
+        }
+
+        decision = quality_decision(assignment, reconstruction)
+
+        self.assertEqual(decision["status"], "review")
+        self.assertIn("low_label_surface_agreement", decision["reasons"])
+        self.assertEqual(decision["label_surface_agreement"], 0.43)
+
     def test_recognizes_expected_sparse_reconstruction_failure(self):
         self.assertTrue(
             insufficient_reconstruction_support(
