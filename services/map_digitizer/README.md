@@ -110,6 +110,10 @@ Artifact names are stable API identifiers: `surface_preview`, `pixel_grid`,
 `pixel_contours`, `cps3`, `xyz`, `prj` and `georeference_metadata`. The API never
 serves arbitrary paths from a job manifest.
 
+Report map metadata includes an `artifact_id` and `download_url` for each source
+and generated artifact. `GET /api/reports/{report_id}/maps/artifacts/{artifact_id}`
+serves only files under that report run or its registered source directory.
+
 Run the API from `apps/api` and inspect the contract at `/docs`.
 
 Исследовательские прототипы и тяжёлые промежуточные файлы остаются в

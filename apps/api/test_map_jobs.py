@@ -75,6 +75,29 @@ class MapJobsApiTest(unittest.TestCase):
         self.assertEqual(response.json()["status"], "accepted")
         self.assertEqual(response.json()["result"]["quality"]["crossings"], 0)
 
+    def test_status_exposes_stable_artifact_urls(self):
+        job_id = "f" * 32
+        directory = self.settings.runs_root / "map_jobs" / job_id
+        directory.mkdir(parents=True)
+        preview = directory / "surface.png"
+        preview.write_bytes(b"png")
+        (directory / "pipeline_result.json").write_text(
+            json.dumps(
+                {
+                    "status": "accepted",
+                    "artifacts": {"surface_preview": str(preview)},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        payload = self.client.get(f"/api/maps/jobs/{job_id}").json()
+
+        self.assertEqual(
+            payload["artifact_urls"]["surface_preview"],
+            f"/api/maps/jobs/{job_id}/artifacts/surface_preview",
+        )
+
     def test_download_returns_pipeline_artifact(self):
         job_id = "d" * 32
         directory = self.settings.runs_root / "map_jobs" / job_id

@@ -60,6 +60,9 @@ class ApiTest(unittest.TestCase):
         self.assertIn("/api/maps/jobs/{job_id}/georeference", paths)
         self.assertIn("/api/maps/jobs/{job_id}/artifacts/{artifact_name}", paths)
         self.assertIn("/api/reports/{report_id}/maps/run", paths)
+        self.assertIn(
+            "/api/reports/{report_id}/maps/artifacts/{artifact_id}", paths
+        )
 
     @patch.object(report_router, "start_report")
     def test_report_map_rerun_forces_map_stage_and_bundle(self, start_report):
@@ -212,6 +215,31 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(len(payload["sources"]), 1)
         self.assertEqual(len(payload["digitized"]), 1)
         self.assertTrue(payload["digitized"][0]["exists"])
+        self.assertEqual(payload["digitized"][0]["artifact_id"], "digitized-0")
+        self.assertTrue(payload["digitized"][0]["download_url"].endswith("digitized-0"))
+
+        response = self.client.get(payload["digitized"][0]["download_url"])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"preview")
+
+    def test_map_artifact_endpoint_rejects_external_path(self):
+        directory = self.runs / "375392"
+        outside = self.runs.parent / "secret.cps3"
+        outside.write_bytes(b"secret")
+        map_agent = directory / "map_agent"
+        map_agent.mkdir()
+        (map_agent / "result.json").write_text(
+            json.dumps(
+                {"artifacts": [{"name": "surface_grid", "path": str(outside)}]}
+            ),
+            encoding="utf-8",
+        )
+
+        response = self.client.get(
+            "/api/reports/375392/maps/artifacts/digitized-0"
+        )
+
+        self.assertEqual(response.status_code, 404)
 
     @patch("app.routers.reports.reconcile_now")
     def test_scan_registers_and_starts_reports(self, reconcile):

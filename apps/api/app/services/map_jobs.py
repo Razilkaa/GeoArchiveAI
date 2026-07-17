@@ -121,7 +121,24 @@ def map_job_status(job_id: str) -> dict:
     job = read_json(directory / "job.json") or {"job_id": job_id}
     result = read_json(directory / "pipeline_result.json")
     if result is not None:
-        return {**job, "status": result.get("status"), "result": result}
+        urls = {
+            name: f"/api/maps/jobs/{job_id}/artifacts/{name}"
+            for name in PIPELINE_ARTIFACTS
+            if result.get("artifacts", {}).get(name)
+        }
+        if list((directory / "georeferenced").glob("*.json")):
+            urls.update(
+                {
+                    name: f"/api/maps/jobs/{job_id}/artifacts/{name}"
+                    for name in GEOREFERENCE_ARTIFACTS
+                }
+            )
+        return {
+            **job,
+            "status": result.get("status"),
+            "result": result,
+            "artifact_urls": urls,
+        }
     pid = job.get("pid")
     if pid:
         try:
@@ -222,4 +239,10 @@ def georeference_map_job(
     metadata = read_json(output_dir / f"{name}.json")
     if metadata is None:
         raise HTTPException(500, "georeference_manifest_missing")
-    return metadata
+    return {
+        **metadata,
+        "artifact_urls": {
+            artifact: f"/api/maps/jobs/{job_id}/artifacts/{artifact}"
+            for artifact in GEOREFERENCE_ARTIFACTS
+        },
+    }

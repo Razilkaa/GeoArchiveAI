@@ -4,13 +4,22 @@ from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
 
 from app.schemas import AskRequest, IntakeResponse, RunRequest
 from app.config import settings
 from app.services.automation import reconcile_now
 from app.services.intake import save_upload
 from app.services.jobs import start_report
-from app.services.reports import artifact_payload, list_reports, map_payload, read_json, report_run_dir, status_payload
+from app.services.reports import (
+    artifact_payload,
+    list_reports,
+    map_payload,
+    read_json,
+    report_map_artifact,
+    report_run_dir,
+    status_payload,
+)
 from corpus_search import CorpusSearchService
 from rag_service import ReportAnswerService, ReportConfig, load_report_configs
 
@@ -110,6 +119,12 @@ def report_artifacts(report_id: str) -> dict[str, Any]:
 @router.get("/reports/{report_id}/maps")
 def report_maps(report_id: str) -> dict[str, Any]:
     return map_payload(report_id)
+
+
+@router.get("/reports/{report_id}/maps/artifacts/{artifact_id}")
+def download_report_map_artifact(report_id: str, artifact_id: str) -> FileResponse:
+    path, media_type = report_map_artifact(report_id, artifact_id)
+    return FileResponse(path, media_type=media_type)
 
 
 @router.post("/reports/{report_id}/maps/run", status_code=202)

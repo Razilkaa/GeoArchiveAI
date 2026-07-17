@@ -18,6 +18,12 @@ MEDIA_TYPES = {
     ".tif": "image/tiff",
     ".tiff": "image/tiff",
     ".pdf": "application/pdf",
+    ".geojson": "application/geo+json",
+    ".json": "application/json",
+    ".cps3": "text/plain",
+    ".xyz": "text/plain",
+    ".prj": "text/plain",
+    ".npz": "application/octet-stream",
 }
 
 
@@ -155,6 +161,13 @@ def map_payload(report_id: str) -> dict[str, Any]:
                 "size_bytes": path.stat().st_size if path.exists() and path.is_file() else None,
             }
         )
+    for kind, records in (("source", sources), ("digitized", digitized)):
+        for index, item in enumerate(records):
+            artifact_id = f"{kind}-{index}"
+            item["artifact_id"] = artifact_id
+            item["download_url"] = (
+                f"/api/reports/{report_id}/maps/artifacts/{artifact_id}"
+            )
     return {
         "report_id": report_id,
         "sources": sources,
@@ -164,3 +177,29 @@ def map_payload(report_id: str) -> dict[str, Any]:
         "metrics": result.get("metrics", {}),
         "issues": result.get("issues", []),
     }
+
+
+def report_map_artifact(report_id: str, artifact_id: str) -> tuple[Path, str]:
+    directory = report_run_dir(report_id).resolve()
+    manifest = read_json(directory / "job.json", {})
+    source_root = Path(str(manifest.get("source_root") or "")).resolve()
+    payload = map_payload(report_id)
+    records = [*payload["sources"], *payload["digitized"]]
+    record = next(
+        (item for item in records if item.get("artifact_id") == artifact_id), None
+    )
+    if record is None:
+        raise HTTPException(404, "report_map_artifact_not_found")
+    path = Path(str(record.get("path") or ""))
+    if not path.is_absolute():
+        path = settings.project_root / path
+    path = path.resolve()
+    if not path.is_file() or not (
+        path.is_relative_to(directory) or path.is_relative_to(source_root)
+    ):
+        raise HTTPException(404, "report_map_artifact_not_found")
+    media_type = str(
+        record.get("media_type")
+        or MEDIA_TYPES.get(path.suffix.casefold(), "application/octet-stream")
+    )
+    return path, media_type
