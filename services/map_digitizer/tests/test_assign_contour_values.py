@@ -7,10 +7,36 @@ from pathlib import Path
 
 from PIL import Image
 
-from services.map_digitizer.assign_contour_values import dominant_value_band, normalized_label, run
+from services.map_digitizer.assign_contour_values import (
+    dominant_value_band,
+    filter_profile_measurements,
+    infer_contour_interval,
+    normalized_label,
+    run,
+)
 
 
 class AssignContourValuesTest(unittest.TestCase):
+    def test_infers_largest_supported_standard_interval(self):
+        readings = [
+            {"values": [{"text": value}], "zone": "map_body"}
+            for value in ["-0.800", "-0.825", "-0.850", "-0.875", "-0.900"]
+        ]
+        interval, details = infer_contour_interval(readings)
+        self.assertEqual(interval, 0.025)
+        self.assertEqual(details["unique_labels"], 5)
+
+    def test_interval_inference_ignores_profile_corridors(self):
+        readings = [
+            {"values": [{"text": value}], "zone": "map_body"}
+            for value in ["-2.8", "-3.0", "-3.2", "-3.4"]
+        ]
+        readings.append(
+            {"values": [{"text": "-2.72"}], "zone": "map_body", "profile_corridor": True}
+        )
+        interval, _ = infer_contour_interval(readings)
+        self.assertEqual(interval, 0.2)
+
     def test_normalizes_only_contour_interval_values(self):
         self.assertEqual(normalized_label("-3,21", 0.2, 0.06), -3.2)
         self.assertIsNone(normalized_label("-3.11", 0.2, 0.06))
@@ -23,6 +49,13 @@ class AssignContourValuesTest(unittest.TestCase):
         self.assertLess(low, -2.0)
         self.assertGreater(high, -0.8)
         self.assertGreater(low, -3.0)
+
+    def test_filters_isolated_profile_measurement_outlier(self):
+        values = [(index * 10.0, 0.0, -0.9 + index * 0.001) for index in range(12)]
+        values[6] = (60.0, 0.0, -0.8)
+        filtered = filter_profile_measurements(values, 0.025)
+        self.assertEqual(len(filtered), 11)
+        self.assertNotIn((60.0, 0.0, -0.8), filtered)
 
     def test_scales_ocr_coordinates_to_trace_image(self):
         with tempfile.TemporaryDirectory() as temp:

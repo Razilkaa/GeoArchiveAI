@@ -57,6 +57,8 @@ def infer_from_grid(
                     "accepted": True,
                     "value_km": round(snapped, 3),
                     "direct_label": False,
+                    "source_kind": "surface_inference",
+                    "constraint_weight": 8.0,
                     "coverage": coverage,
                     "spread_km": spread,
                     "residual_km": residual,
@@ -81,7 +83,7 @@ def run(
     trusted = assigned[
         (assigned["confident"] == True)
         & assigned["value_km"].notna()
-        & assigned["kind"].isin(["isoline", "contour_label"])
+        & assigned["kind"].isin(["isoline", "contour_label", "profile_measurement"])
     ]
     constraints = [
         {
@@ -89,6 +91,12 @@ def run(
             "accepted": True,
             "value_km": float(row.value_km),
             "direct_label": True,
+            "source_kind": str(row.kind),
+            "constraint_weight": (
+                30.0 if row.geometry.geom_type == "LineString"
+                else 12.0 if row.kind == "contour_label"
+                else 2.0
+            ),
             "coverage": 1.0,
             "spread_km": 0.0,
             "residual_km": 0.0,
@@ -111,7 +119,15 @@ def run(
     for iteration in range(iterations + 1):
         active = [item for item in constraints if item["accepted"]]
         contour_frame = gpd.GeoDataFrame(
-            [{"trace_id": item["id"], "value_km": item["value_km"], "geometry": item["geometry"]} for item in active],
+            [
+                {
+                    "trace_id": item["id"],
+                    "value_km": item["value_km"],
+                    "constraint_weight": item["constraint_weight"],
+                    "geometry": item["geometry"],
+                }
+                for item in active
+            ],
             geometry="geometry",
             crs="EPSG:3857",
         )

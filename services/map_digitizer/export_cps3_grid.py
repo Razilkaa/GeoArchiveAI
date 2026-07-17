@@ -62,6 +62,32 @@ def sample_contours(contours: gpd.GeoDataFrame, spacing: float) -> tuple[np.ndar
     return coordinates, z_values
 
 
+def sample_weighted_contours(
+    contours: gpd.GeoDataFrame, spacing: float, default_weight: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    points: list[tuple[float, float]] = []
+    values: list[float] = []
+    weights: list[float] = []
+    for row in contours.itertuples():
+        geometry = row.geometry
+        if geometry.geom_type == "Point":
+            sampled = [geometry]
+        elif geometry.geom_type == "LineString":
+            count = max(2, math.ceil(geometry.length / spacing) + 1)
+            sampled = [
+                geometry.interpolate(float(distance))
+                for distance in np.linspace(0.0, geometry.length, count)
+            ]
+        else:
+            continue
+        weight = float(getattr(row, "constraint_weight", default_weight))
+        for point in sampled:
+            points.append((point.x, point.y))
+            values.append(float(row.value_km) * 1000.0)
+            weights.append(weight)
+    return np.asarray(points), np.asarray(values), np.asarray(weights)
+
+
 def build_grid(
     contours: gpd.GeoDataFrame,
     *,
@@ -97,7 +123,9 @@ def build_harmonic_grid(
     here: it honours the digitized contours, remains inside their value range,
     and produces one continuous surface whose derived contours cannot cross.
     """
-    points, values = sample_contours(contours, min(cell_size * 0.5, 125.0))
+    points, values, point_weights = sample_weighted_contours(
+        contours, min(cell_size * 0.5, 125.0), constraint_weight
+    )
     support = support_contours if support_contours is not None and len(support_contours) else contours
     support_points, _ = sample_contours(
         support.assign(value_km=0.0), min(cell_size * 0.5, 125.0)
@@ -121,12 +149,21 @@ def build_harmonic_grid(
     # are retained as a QC signal and resolved by a median, never silently.
     col = np.clip(np.rint((points[:, 0] - x[0]) / cell_size).astype(int), 0, len(x) - 1)
     row = np.clip(np.rint((points[:, 1] - y[0]) / cell_size).astype(int), 0, len(y) - 1)
-    cell_values: dict[tuple[int, int], list[float]] = {}
-    for r, c, value in zip(row, col, values):
+    cell_values: dict[tuple[int, int], list[tuple[float, float]]] = {}
+    for r, c, value, weight in zip(row, col, values, point_weights):
         if mask[r, c]:
-            cell_values.setdefault((int(r), int(c)), []).append(float(value))
-    fixed = {cell: float(np.median(items)) for cell, items in cell_values.items()}
-    conflict_cells = sum(max(items) - min(items) > 1.0 for items in cell_values.values())
+            cell_values.setdefault((int(r), int(c)), []).append((float(value), float(weight)))
+    fixed = {
+        cell: float(np.average([item[0] for item in items], weights=[item[1] for item in items]))
+        for cell, items in cell_values.items()
+    }
+    fixed_weights = {
+        cell: float(max(item[1] for item in items)) for cell, items in cell_values.items()
+    }
+    conflict_cells = sum(
+        max(item[0] for item in items) - min(item[0] for item in items) > 1.0
+        for items in cell_values.values()
+    )
 
     # Keep only connected support regions that contain at least one trusted
     # value. This expands to unlabelled traced margins without inventing a
@@ -138,6 +175,7 @@ def build_harmonic_grid(
     if component_count:
         mask = np.isin(component_map, list(constrained_components))
         fixed = {cell: value for cell, value in fixed.items() if mask[cell]}
+        fixed_weights = {cell: value for cell, value in fixed_weights.items() if mask[cell]}
 
     active = [tuple(item) for item in np.argwhere(mask)]
     active_index = {cell: index for index, cell in enumerate(active)}
@@ -159,8 +197,9 @@ def build_harmonic_grid(
             matrix_data.append(-1.0)
         diagonal = float(max(degree, 1))
         if (r, c) in fixed:
-            diagonal += constraint_weight
-            rhs[index] += constraint_weight * fixed[(r, c)]
+            weight = fixed_weights[(r, c)]
+            diagonal += weight
+            rhs[index] += weight * fixed[(r, c)]
         matrix_rows.append(index)
         matrix_cols.append(index)
         matrix_data.append(diagonal)
@@ -182,6 +221,7 @@ def build_harmonic_grid(
         "support_components": int(len(constrained_components)),
         "fixed_cells": int(len(fixed)),
         "constraint_weight": float(constraint_weight),
+        "constraint_weight_range": [float(point_weights.min()), float(point_weights.max())],
         "conflicting_fixed_cells": int(conflict_cells),
         "constraint_rmse_m": float(np.sqrt(np.mean(residual ** 2))) if len(residual) else None,
         "constraint_p95_abs_error_m": (

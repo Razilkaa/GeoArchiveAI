@@ -6,9 +6,20 @@ import unittest
 from pathlib import Path
 
 from services.map_digitizer.stitch_isolines import propagate_values_by_tangent, read_isoline_labels
+from services.map_digitizer.trace_map_isolines import stitch_polylines
 
 
 class StitchIsolinesTest(unittest.TestCase):
+    def test_stitches_collinear_gap_but_not_crossing_line(self):
+        lines = [
+            [[0, 0], [10, 0]],
+            [[15, 0], [25, 0]],
+            [[12, -10], [12, 10]],
+        ]
+        stitched = stitch_polylines(lines, max_gap=8, minimum_alignment=0.9)
+        self.assertEqual(len(stitched), 2)
+        self.assertEqual(max(len(line) for line in stitched), 4)
+
     def test_large_strict_small_band_label_is_kept_but_picket_is_not(self):
         payload = {
             "items": [
