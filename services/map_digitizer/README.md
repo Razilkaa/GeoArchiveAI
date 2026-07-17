@@ -121,6 +121,8 @@ serves arbitrary paths from a job manifest.
 Report map metadata includes an `artifact_id` and `download_url` for each source
 and generated artifact. `GET /api/reports/{report_id}/maps/artifacts/{artifact_id}`
 serves only files under that report run or its registered source directory.
+Standalone jobs are capped by `MAP_MAX_JOBS` (default: 2); excess submissions
+receive HTTP 429 instead of oversubscribing the OCR GPU.
 
 Run the API from `apps/api` and inspect the contract at `/docs`.
 

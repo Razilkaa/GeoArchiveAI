@@ -15,6 +15,7 @@ class Settings:
     auto_intake_interval_s: int = int(os.getenv("AUTO_INTAKE_INTERVAL_S", "10"))
     auto_intake_settle_s: int = int(os.getenv("AUTO_INTAKE_SETTLE_S", "30"))
     auto_max_reports: int = int(os.getenv("AUTO_MAX_REPORTS", "2"))
+    map_max_jobs: int = int(os.getenv("MAP_MAX_JOBS", "2"))
 
     @property
     def runs_root(self) -> Path:

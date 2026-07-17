@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import uuid
 from pathlib import Path
 from typing import BinaryIO
@@ -26,6 +27,7 @@ PIPELINE_ARTIFACTS = {
     "pixel_contours",
 }
 GEOREFERENCE_ARTIFACTS = {"cps3", "xyz", "prj", "georeference_metadata"}
+MAP_START_LOCK = threading.Lock()
 
 
 def map_jobs_root() -> Path:
@@ -49,7 +51,42 @@ def read_json(path: Path) -> dict | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def active_map_job_count() -> int:
+    active = 0
+    for directory in map_jobs_root().iterdir():
+        if not directory.is_dir() or (directory / "pipeline_result.json").exists():
+            continue
+        job = read_json(directory / "job.json") or {}
+        pid = job.get("pid")
+        if not pid:
+            continue
+        try:
+            os.kill(int(pid), 0)
+        except OSError:
+            continue
+        active += 1
+    return active
+
+
 def start_map_job(
+    filename: str,
+    source: BinaryIO,
+    *,
+    interval: float | None = None,
+    trace_scale: float = 0.6,
+) -> dict:
+    with MAP_START_LOCK:
+        if active_map_job_count() >= max(1, getattr(settings, "map_max_jobs", 2)):
+            raise HTTPException(429, "map_job_capacity_reached")
+        return _start_map_job(
+            filename,
+            source,
+            interval=interval,
+            trace_scale=trace_scale,
+        )
+
+
+def _start_map_job(
     filename: str,
     source: BinaryIO,
     *,

@@ -57,6 +57,16 @@ class MapJobsApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 415)
         self.assertEqual(response.json()["detail"], "unsupported_map_image")
 
+    @patch.object(map_jobs, "active_map_job_count", return_value=2)
+    def test_upload_respects_map_worker_capacity(self, _active_count):
+        response = self.client.post(
+            "/api/maps/jobs",
+            files={"file": ("sheet.jpg", io.BytesIO(b"jpeg"), "image/jpeg")},
+        )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.json()["detail"], "map_job_capacity_reached")
+
     def test_status_returns_completed_manifest(self):
         job_id = "a" * 32
         directory = self.settings.runs_root / "map_jobs" / job_id
