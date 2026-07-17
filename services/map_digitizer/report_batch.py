@@ -11,8 +11,9 @@ import fitz
 import numpy as np
 from PIL import Image
 
+from services.map_digitizer import PIPELINE_VERSION
 from services.map_digitizer.batch import reusable_result
-from services.map_digitizer.pipeline import PIPELINE_VERSION, run_pipeline
+from services.map_digitizer.pipeline import run_pipeline
 
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}

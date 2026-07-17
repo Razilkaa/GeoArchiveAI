@@ -7,7 +7,8 @@ import json
 from pathlib import Path
 
 from services.map_digitizer.benchmark import summarize_results
-from services.map_digitizer.pipeline import PIPELINE_VERSION, file_sha256, run_pipeline
+from services.map_digitizer import PIPELINE_VERSION
+from services.map_digitizer.pipeline import file_sha256, run_pipeline
 
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}

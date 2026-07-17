@@ -11,6 +11,7 @@ from typing import Callable
 
 from PIL import Image
 
+from services.map_digitizer import PIPELINE_VERSION
 from services.map_digitizer.assign_contour_values import (
     dominant_value_band,
     run as assign_values,
@@ -22,7 +23,6 @@ from services.map_digitizer.trace_guided_surface import run as reconstruct_trace
 from services.map_digitizer.trace_map_isolines import trace
 
 Image.MAX_IMAGE_PIXELS = None
-PIPELINE_VERSION = 3
 MIN_DENSE_PROFILE_MEASUREMENTS = 80
 
 

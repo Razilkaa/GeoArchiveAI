@@ -7,6 +7,7 @@ from fastapi import APIRouter
 
 from app.config import settings
 from app.services.automation import queue_status
+from services.map_digitizer import PIPELINE_VERSION
 
 
 router = APIRouter(tags=["system"])
@@ -32,6 +33,11 @@ def services() -> dict[str, Any]:
     return {
         "api": {"status": "ok", "docs": "/docs"},
         "ocr": ocr,
+        "map_digitizer": {
+            "status": "ok",
+            "pipeline_version": PIPELINE_VERSION,
+            "acceptance_policy": "dense_auto_accept_sparse_review",
+        },
         "ragflow": {"url": settings.ragflow_url},
     }
 
