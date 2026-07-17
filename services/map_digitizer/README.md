@@ -93,6 +93,8 @@ python -m unittest discover -s services/map_digitizer/tests -q
 The pixel grid is georeferenced only after at least three pixel-to-map control
 points and the project CRS are known. Four or more controls provide an
 independent residual check; a three-point affine fit is always marked `review`.
+Georeferencing cannot upgrade a `review` source surface to `accepted`; both the
+surface QC and independent control-point QC must pass.
 
 ```powershell
 python -m services.map_digitizer.georeference_grid `

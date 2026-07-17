@@ -221,6 +221,30 @@ def map_job_artifact(job_id: str, artifact_name: str) -> Path:
     return candidate
 
 
+def combine_georeference_quality(metadata: dict, source_result: dict) -> dict:
+    metadata = dict(metadata)
+    georeference_status = str(metadata.get("status") or "review")
+    source_status = str(source_result.get("status") or "review")
+    reasons = list((source_result.get("quality") or {}).get("reasons", []))
+    if source_status != "accepted":
+        reasons.append("source_surface_requires_review")
+    if georeference_status != "accepted":
+        reasons.append("georeference_control_requires_review")
+    metadata.update(
+        {
+            "status": (
+                "accepted"
+                if source_status == "accepted" and georeference_status == "accepted"
+                else "review"
+            ),
+            "source_surface_status": source_status,
+            "georeference_status": georeference_status,
+            "quality_reasons": list(dict.fromkeys(reasons)),
+        }
+    )
+    return metadata
+
+
 def georeference_map_job(
     job_id: str,
     *,
@@ -276,6 +300,10 @@ def georeference_map_job(
     metadata = read_json(output_dir / f"{name}.json")
     if metadata is None:
         raise HTTPException(500, "georeference_manifest_missing")
+    metadata = combine_georeference_quality(metadata, result)
+    (output_dir / f"{name}.json").write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return {
         **metadata,
         "artifact_urls": {

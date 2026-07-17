@@ -178,6 +178,32 @@ class MapJobsApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
+    def test_georeference_cannot_approve_review_surface(self):
+        combined = map_jobs.combine_georeference_quality(
+            {"status": "accepted", "control_quality": {"p95_m": 0.1}},
+            {
+                "status": "review",
+                "quality": {"reasons": ["sparse_reconstruction_requires_review"]},
+            },
+        )
+
+        self.assertEqual(combined["status"], "review")
+        self.assertEqual(combined["georeference_status"], "accepted")
+        self.assertEqual(combined["source_surface_status"], "review")
+        self.assertIn("source_surface_requires_review", combined["quality_reasons"])
+        self.assertIn(
+            "sparse_reconstruction_requires_review", combined["quality_reasons"]
+        )
+
+    def test_georeference_accepts_only_when_both_stages_accept(self):
+        combined = map_jobs.combine_georeference_quality(
+            {"status": "accepted"},
+            {"status": "accepted", "quality": {"reasons": []}},
+        )
+
+        self.assertEqual(combined["status"], "accepted")
+        self.assertEqual(combined["quality_reasons"], [])
+
 
 if __name__ == "__main__":
     unittest.main()
