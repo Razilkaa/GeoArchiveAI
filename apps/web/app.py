@@ -415,9 +415,12 @@ with materials_tab:
     if not page_ids:
         st.info("Карты в отчёте не обнаружены.")
     else:
+        default_page = "page:00184" if "page:00184" in page_ids else page_ids[0]
         selected_page = st.selectbox(
             "Лист",
             page_ids,
+            index=page_ids.index(default_page),
+            key="map-page-v2",
             format_func=lambda page_id: next(
                 (item.get("label") or page_id for item in source_maps if item.get("page_id") == page_id),
                 page_id,

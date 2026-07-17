@@ -203,7 +203,7 @@ def map_payload(report_id: str) -> dict[str, Any]:
                 sources.insert(
                     0,
                     {
-                        "page_id": None,
+                        "page_id": artifact.get("page_id"),
                         "label": artifact.get("label") or f"Исходная карта · {path.name}",
                         "path": str(path),
                         "media_type": artifact.get("media_type")
