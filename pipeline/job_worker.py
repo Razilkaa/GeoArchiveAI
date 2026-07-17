@@ -4,11 +4,16 @@ import argparse
 import json
 import os
 import socket
+import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent_contracts import atomic_json_write, utc_now
 from build_result_bundle import build_bundle
@@ -25,10 +30,11 @@ from factory_runner import (
 from page_router import route_pages
 from report_factory import ensure_full_text_strategy
 from report_orchestrator import ReportOrchestrator
+from services.map_digitizer.report_batch import report_map_signature, run_report_maps
 
 
 CORE_STAGES = ("page_routing", "fast_ocr", "markdown", "ragflow", "bundle")
-OPTIONAL_STAGES = ("agents", "operator")
+OPTIONAL_STAGES = ("map_digitization", "agents", "operator")
 ALL_STAGES = (*CORE_STAGES, *OPTIONAL_STAGES)
 
 
@@ -187,13 +193,29 @@ class JobWorker:
             and all(item.get("status") == "completed" for item in value["agents"].values()),
         )
 
+    def _maps_path(self) -> Path:
+        return self.run_dir / "map_agent" / "result.json"
+
+    def _maps_valid(self) -> bool:
+        expected = report_map_signature(load_manifest(self.manifest_path))
+        return _valid_json(
+            self._maps_path(),
+            lambda value: value.get("status") == "completed"
+            and value.get("manifest_signature") == expected,
+        )
+
     def _bundle_path(self) -> Path:
         return self.run_dir / "result_bundle.json"
 
     def _bundle_valid(self) -> bool:
         if not self._bundle_path().exists() or not self._ragflow_path().exists():
             return False
-        return self._bundle_path().stat().st_mtime_ns >= self._ragflow_path().stat().st_mtime_ns and _valid_json(
+        dependencies = [self._ragflow_path()]
+        if self._maps_path().exists():
+            dependencies.append(self._maps_path())
+        return self._bundle_path().stat().st_mtime_ns >= max(
+            path.stat().st_mtime_ns for path in dependencies
+        ) and _valid_json(
             self._bundle_path(),
             lambda value: value.get("report_id") == self.report_id
             and value.get("status") in {"completed", "review"},
@@ -333,6 +355,23 @@ class JobWorker:
                     False,
                 ),
             ]
+            if self.config.ocr_api_url:
+                stages.insert(
+                    1,
+                    (
+                        "map_digitization",
+                        self._maps_valid,
+                        lambda: run_report_maps(
+                            self.manifest_path, str(self.config.ocr_api_url)
+                        ),
+                        False,
+                    ),
+                )
+            else:
+                self.state["stages"]["map_digitization"].update(
+                    {"status": "skipped", "reason": "ocr_api_not_configured"}
+                )
+                self._save()
             if self.config.enable_enrichment:
                 stages.insert(
                     -1,
@@ -360,7 +399,7 @@ class JobWorker:
                     )
                 )
             else:
-                for name in OPTIONAL_STAGES:
+                for name in ("agents", "operator"):
                     self.state["stages"][name]["status"] = "skipped"
                     self.state["stages"][name]["reason"] = "optional_enrichment_disabled"
                 self._save()

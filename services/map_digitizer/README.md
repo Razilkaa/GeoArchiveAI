@@ -46,11 +46,18 @@ python -m services.map_digitizer.benchmark "runs/map_batch" `
    - `sparse_labels_trace_guided` для карт только с подписями изолиний.
 5. `quality` проверяет ошибки ограничений, пересечения, диапазон и лишние замыкания.
 
-Large scans are OCRed as overlapping tiles when they exceed 40 megapixels. Tile
-coordinates are restored to the source image and overlap duplicates are merged,
-which bounds GPU memory instead of sending one oversized tensor. Reconstructed
+Large scans are downscaled to a 4000-pixel maximum side before OCR when they
+exceed 40 megapixels. Coordinates are restored to the source image; overlapping
+tiles are used only as an OOM fallback. This bounds GPU memory without four
+expensive requests per normal 8K scan. Reconstructed
 surfaces reject short unlabelled trace fragments and isolated closed contours
 without source or adjacent-level support.
+
+`services.map_digitizer.report_batch` consumes the report `job.json`, processes
+pages routed as `map` or `chart`, rejects visual duplicates and writes the
+existing `map_agent/result.json` contract. `chart` candidates can never be
+auto-accepted. The report worker runs this stage automatically after page
+routing and preserves external/manual georeferenced artifacts on reruns.
 
 ## Результат
 

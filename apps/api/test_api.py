@@ -164,6 +164,42 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(len(response.json()["sources"]), 1)
         self.assertEqual(response.json()["sources"][0]["path"], str(source))
 
+    def test_maps_endpoint_separates_digitized_artifacts_and_quality(self):
+        directory = self.runs / "375392"
+        source = directory / "map.jpg"
+        preview = directory / "surface.png"
+        source.write_bytes(b"image")
+        preview.write_bytes(b"preview")
+        map_agent = directory / "map_agent"
+        map_agent.mkdir()
+        (map_agent / "result.json").write_text(
+            json.dumps(
+                {
+                    "status": "completed",
+                    "quality_status": "review",
+                    "metrics": {"accepted": 1, "review": 1},
+                    "artifacts": [
+                        {"name": "source_map", "path": str(source)},
+                        {
+                            "name": "surface_preview",
+                            "path": str(preview),
+                            "media_type": "image/png",
+                            "page_id": "page:1",
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        payload = self.client.get("/api/reports/375392/maps").json()
+
+        self.assertEqual(payload["quality_status"], "review")
+        self.assertEqual(payload["metrics"]["accepted"], 1)
+        self.assertEqual(len(payload["sources"]), 1)
+        self.assertEqual(len(payload["digitized"]), 1)
+        self.assertTrue(payload["digitized"][0]["exists"])
+
     @patch("app.routers.reports.reconcile_now")
     def test_scan_registers_and_starts_reports(self, reconcile):
         reconcile.return_value = {

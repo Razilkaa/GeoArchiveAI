@@ -13,7 +13,7 @@ from PIL import Image
 
 
 MAX_DIRECT_PIXELS = 40_000_000
-TILE_SIZE = 5000
+TILE_SIZE = 4000
 
 
 def _post_ocr(image_path: Path, api_url: str, timeout: float) -> dict:
@@ -49,6 +49,18 @@ def _offset_line(line: dict, offset_x: int, offset_y: int) -> dict:
         ]
         shifted.pop("points", None)
     return shifted
+
+
+def _scale_line(line: dict, scale_x: float, scale_y: float) -> dict:
+    scaled = dict(line)
+    polygon = line.get("polygon") or line.get("points")
+    if polygon:
+        scaled["polygon"] = [
+            [float(point[0]) * scale_x, float(point[1]) * scale_y]
+            for point in polygon
+        ]
+        scaled.pop("points", None)
+    return scaled
 
 
 def _bounds(line: dict) -> tuple[float, float, float, float] | None:
@@ -106,11 +118,39 @@ def request_ocr(
             return post(image_path, api_url, timeout)
 
         started = time.perf_counter()
-        all_lines: list[dict] = []
-        tile_count = 0
-        engine_payload: dict = {}
         with tempfile.TemporaryDirectory(prefix="geoarchive_ocr_") as temporary:
             temporary_root = Path(temporary)
+            resize_scale = min(1.0, tile_size / max(width, height))
+            resized_width = max(1, round(width * resize_scale))
+            resized_height = max(1, round(height * resize_scale))
+            normalized_path = temporary_root / "normalized.png"
+            source.resize(
+                (resized_width, resized_height), Image.Resampling.LANCZOS
+            ).save(normalized_path, format="PNG", optimize=False)
+            try:
+                payload = post(normalized_path, api_url, timeout)
+            except requests.RequestException:
+                payload = None
+            if payload is not None:
+                lines = [
+                    _scale_line(line, width / resized_width, height / resized_height)
+                    for line in payload.get("lines") or []
+                ]
+                return {
+                    **{key: value for key, value in payload.items() if key not in {"lines", "text"}},
+                    "latency_s": round(time.perf_counter() - started, 3),
+                    "text": "\n".join(str(line.get("text", "")) for line in lines),
+                    "lines": lines,
+                    "line_count": len(lines),
+                    "preprocessing": "downscaled",
+                    "scale_to_source": [width / resized_width, height / resized_height],
+                    "filename": image_path.name,
+                    "image_size": [width, height],
+                }
+
+            all_lines: list[dict] = []
+            tile_count = 0
+            engine_payload: dict = {}
             for y in tile_starts(height, tile_size):
                 for x in tile_starts(width, tile_size):
                     tile_count += 1
