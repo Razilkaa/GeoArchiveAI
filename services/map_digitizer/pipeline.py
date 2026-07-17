@@ -111,6 +111,13 @@ def select_reconstruction_mode(assignment: dict) -> str:
     )
 
 
+def insufficient_reconstruction_support(error: ValueError) -> bool:
+    message = str(error)
+    return message.startswith("Only ") and "traced contours passed QC" in message or (
+        "need at least one array to concatenate" in message
+    )
+
+
 def reconstruct_adaptive(
     assignment: dict,
     assignment_path: Path,
@@ -230,18 +237,49 @@ def run_pipeline(
         ),
     )
     result["stages"]["assignment"]["metrics"] = assignment
+    if (
+        int(assignment.get("confident_polylines", 0)) == 0
+        and int(assignment.get("profile_measurements", 0)) < 20
+    ):
+        result["status"] = "not_applicable"
+        result["quality"] = {
+            "status": "not_applicable",
+            "reasons": ["no_direct_contour_support"],
+        }
+        result["total_latency_s"] = round(
+            sum(float(stage["latency_s"]) for stage in result["stages"].values()), 3
+        )
+        result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        return result
     reconstruction_dir = output_dir / "surface"
-    reconstruction = execute(
-        "reconstruction",
-        lambda: reconstruct_adaptive(
-            assignment,
-            assignment_dir / "valued_contours_pixels.geojson",
-            trace_dir / "isolines.json",
-            ocr_path,
-            image_path,
-            reconstruction_dir,
-        ),
-    )
+    try:
+        reconstruction = execute(
+            "reconstruction",
+            lambda: reconstruct_adaptive(
+                assignment,
+                assignment_dir / "valued_contours_pixels.geojson",
+                trace_dir / "isolines.json",
+                ocr_path,
+                image_path,
+                reconstruction_dir,
+            ),
+        )
+    except ValueError as error:
+        if not insufficient_reconstruction_support(error):
+            raise
+        result.pop("failed_stage", None)
+        result.pop("error", None)
+        result["stages"]["reconstruction"]["status"] = "not_applicable"
+        result["status"] = "not_applicable"
+        result["quality"] = {
+            "status": "not_applicable",
+            "reasons": ["insufficient_traced_contour_support"],
+        }
+        result["total_latency_s"] = round(
+            sum(float(stage["latency_s"]) for stage in result["stages"].values()), 3
+        )
+        result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        return result
     result["stages"]["reconstruction"]["metrics"] = reconstruction
     result["quality"] = quality_decision(assignment, reconstruction)
     result["status"] = result["quality"]["status"]

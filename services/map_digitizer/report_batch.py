@@ -11,6 +11,7 @@ import fitz
 import numpy as np
 from PIL import Image
 
+from services.map_digitizer.batch import reusable_result
 from services.map_digitizer.pipeline import run_pipeline
 
 
@@ -96,10 +97,67 @@ def run_report_maps(
     except (OSError, json.JSONDecodeError):
         existing_result = {}
     output_root.mkdir(parents=True, exist_ok=True)
+    jobs_root_resolved = jobs_root.resolve()
+    preserved_artifacts = []
+    for item in existing_result.get("artifacts", []):
+        path = Path(str(item.get("path") or ""))
+        if not path.exists():
+            continue
+        try:
+            managed = path.resolve().is_relative_to(jobs_root_resolved)
+        except (OSError, ValueError):
+            managed = False
+        if not managed:
+            preserved_artifacts.append(item)
     fingerprints: list[np.ndarray] = []
     jobs = []
     artifacts = []
     issues = []
+
+    def checkpoint(status: str) -> dict:
+        statuses = [job["status"] for job in jobs if job["status"] != "duplicate"]
+        quality_status = (
+            "review"
+            if "review" in statuses or "failed" in statuses
+            else "accepted"
+            if "accepted" in statuses
+            else "not_applicable"
+        )
+        generated_paths = {str(item.get("path")) for item in artifacts}
+        combined_artifacts = [
+            *artifacts,
+            *[
+                item
+                for item in preserved_artifacts
+                if str(item.get("path")) not in generated_paths
+            ],
+        ]
+        payload = {
+            "producer": "services.map_digitizer.report_batch",
+            "status": status,
+            "quality_status": quality_status,
+            "manifest_signature": report_map_signature(manifest),
+            "metrics": {
+                "candidates": len(map_pages(manifest)),
+                "processed": len(statuses),
+                "duplicates": sum(job["status"] == "duplicate" for job in jobs),
+                "accepted": statuses.count("accepted"),
+                "review": statuses.count("review"),
+                "not_applicable": statuses.count("not_applicable"),
+                "failed": statuses.count("failed"),
+                "reused": sum(bool(job.get("reused")) for job in jobs),
+                "preserved_artifacts": len(preserved_artifacts),
+            },
+            "jobs": jobs,
+            "artifacts": combined_artifacts,
+            "issues": issues,
+        }
+        temporary = output_root / "result.json.tmp"
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(output_root / "result.json")
+        return payload
+
+    checkpoint("running")
     for page in map_pages(manifest):
         page_id = str(page.get("id") or "unknown")
         try:
@@ -107,14 +165,18 @@ def run_report_maps(
             fingerprint = perceptual_hash(source)
             if is_visual_duplicate(fingerprint, fingerprints):
                 jobs.append({"page_id": page_id, "status": "duplicate", "source": str(source)})
+                checkpoint("running")
                 continue
             fingerprints.append(fingerprint)
             job_dir = jobs_root / _safe_page_id(page_id)
-            result = pipeline_runner(
-                source,
-                job_dir,
-                ocr_api_url=ocr_api_url,
-            )
+            result = reusable_result(job_dir / "pipeline_result.json", source)
+            reused = result is not None
+            if result is None:
+                result = pipeline_runner(
+                    source,
+                    job_dir,
+                    ocr_api_url=ocr_api_url,
+                )
             routed_type = str(page.get("content_type") or "map")
             effective_status = str(result.get("status"))
             effective_quality = dict(result.get("quality") or {})
@@ -133,6 +195,7 @@ def run_report_maps(
                     "source": str(source),
                     "result": str(job_dir / "pipeline_result.json"),
                     "quality": effective_quality,
+                    "reused": reused,
                 }
             )
             artifacts.append(
@@ -170,52 +233,9 @@ def run_report_maps(
                     "severity": "warning",
                 }
             )
+        checkpoint("running")
 
-    statuses = [job["status"] for job in jobs if job["status"] != "duplicate"]
-    quality_status = (
-        "review"
-        if "review" in statuses or "failed" in statuses
-        else "accepted"
-        if "accepted" in statuses
-        else "not_applicable"
-    )
-    generated_paths = {str(item.get("path")) for item in artifacts}
-    preserved_artifacts = []
-    jobs_root_resolved = jobs_root.resolve()
-    for item in existing_result.get("artifacts", []):
-        path = Path(str(item.get("path") or ""))
-        if not path.exists() or str(path) in generated_paths:
-            continue
-        try:
-            managed = path.resolve().is_relative_to(jobs_root_resolved)
-        except (OSError, ValueError):
-            managed = False
-        if not managed:
-            preserved_artifacts.append(item)
-    artifacts.extend(preserved_artifacts)
-    payload = {
-        "producer": "services.map_digitizer.report_batch",
-        "status": "completed",
-        "quality_status": quality_status,
-        "manifest_signature": report_map_signature(manifest),
-        "metrics": {
-            "candidates": len(map_pages(manifest)),
-            "processed": len(statuses),
-            "duplicates": sum(job["status"] == "duplicate" for job in jobs),
-            "accepted": statuses.count("accepted"),
-            "review": statuses.count("review"),
-            "not_applicable": statuses.count("not_applicable"),
-            "failed": statuses.count("failed"),
-            "preserved_artifacts": len(preserved_artifacts),
-        },
-        "jobs": jobs,
-        "artifacts": artifacts,
-        "issues": issues,
-    }
-    temporary = output_root / "result.json.tmp"
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    temporary.replace(output_root / "result.json")
-    return payload
+    return checkpoint("completed")
 
 
 def main() -> None:

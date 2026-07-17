@@ -38,6 +38,7 @@ class ReportBatchTest(unittest.TestCase):
                 preview.write_bytes(b"png")
                 result = {
                     "status": "accepted",
+                    "source": str(image_path.resolve()),
                     "quality": {"status": "accepted"},
                     "artifacts": {"surface_preview": str(preview)},
                 }
@@ -47,11 +48,16 @@ class ReportBatchTest(unittest.TestCase):
             result = run_report_maps(
                 manifest_path, "http://ocr", pipeline_runner=fake_pipeline
             )
+            resumed = run_report_maps(
+                manifest_path, "http://ocr", pipeline_runner=fake_pipeline
+            )
 
         self.assertEqual(len(calls), 1)
         self.assertEqual(result["quality_status"], "accepted")
         self.assertEqual(result["metrics"]["duplicates"], 1)
         self.assertEqual(result["metrics"]["candidates"], 2)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(resumed["metrics"]["reused"], 1)
 
     def test_chart_candidate_cannot_be_auto_accepted(self):
         with tempfile.TemporaryDirectory() as temporary:

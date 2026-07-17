@@ -6,6 +6,7 @@ from services.map_digitizer.pipeline import (
     assess_ocr_eligibility,
     quality_decision,
     select_reconstruction_mode,
+    insufficient_reconstruction_support,
 )
 
 
@@ -83,6 +84,14 @@ class PipelineQualityTest(unittest.TestCase):
         }
         decision = quality_decision(assignment, reconstruction)
         self.assertIn("excessive_closed_contours", decision["reasons"])
+
+    def test_recognizes_expected_sparse_reconstruction_failure(self):
+        self.assertTrue(
+            insufficient_reconstruction_support(
+                ValueError("Only 2 traced contours passed QC")
+            )
+        )
+        self.assertFalse(insufficient_reconstruction_support(ValueError("broken grid shape")))
 
 
 if __name__ == "__main__":
