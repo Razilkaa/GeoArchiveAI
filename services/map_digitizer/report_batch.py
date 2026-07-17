@@ -122,7 +122,10 @@ def run_report_maps(
     output_root.mkdir(parents=True, exist_ok=True)
     jobs_root_resolved = jobs_root.resolve()
     preserved_artifacts = []
-    generated_names = {"source_map", "surface_preview", "pixel_grid", "pixel_contours"}
+    generated_names = {
+        "source_map", "surface_preview", "surface_clean_preview", "pixel_grid",
+        "pixel_contours", "local_cps3", "local_xyz", "local_export_metadata",
+    }
     for item in existing_result.get("artifacts", []):
         if (
             existing_result.get("producer") == "services.map_digitizer.report_batch"
@@ -242,8 +245,12 @@ def run_report_maps(
             if effective_status in {"accepted", "review"}:
                 for name, label, media_type in (
                     ("surface_preview", "Оцифрованная поверхность", "image/png"),
+                    ("surface_clean_preview", "Чистая оцифрованная карта", "image/png"),
                     ("pixel_grid", "Grid в пиксельной системе", "application/octet-stream"),
                     ("pixel_contours", "Оцифрованные изолинии", "application/geo+json"),
+                    ("local_cps3", "CPS-3 Grid (локальная система листа)", "text/plain"),
+                    ("local_xyz", "XYZ (локальная система листа)", "text/plain"),
+                    ("local_export_metadata", "Метаданные локального Grid", "application/json"),
                 ):
                     path = result.get("artifacts", {}).get(name)
                     if path:

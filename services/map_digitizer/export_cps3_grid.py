@@ -283,7 +283,13 @@ def contour_topology(contours: gpd.GeoDataFrame) -> dict:
     }
 
 
-def write_cps3(grid: Grid, output: Path, name: str) -> None:
+def write_cps3(
+    grid: Grid,
+    output: Path,
+    name: str,
+    *,
+    crs_label: str | None = None,
+) -> None:
     finite = grid.z[np.isfinite(grid.z)]
     if finite.size == 0:
         raise ValueError("Grid contains no finite cells")
@@ -291,7 +297,7 @@ def write_cps3(grid: Grid, output: Path, name: str) -> None:
     dy = float(grid.y[1] - grid.y[0]) if len(grid.y) > 1 else 0.0
     lines = [
         f'! Surface: {name}',
-        f'! CRS: {grid.crs.to_string()} | {grid.crs.name}',
+        f'! CRS: {crs_label or f"{grid.crs.to_string()} | {grid.crs.name}"}',
         '! Z unit: metre; negative values are subsea depth/elevation',
         'FSASCI 0 1 "Computed" 0 1E30 0',
         'FSATTR 4 2 2 0',

@@ -75,12 +75,16 @@ routing and preserves external/manual georeferenced artifacts on reruns.
 - `stages`: время и метрики каждого этапа;
 - `quality.reasons`: причины ручной или модельной проверки;
 - `artifacts.surface_preview`: сравнение исходника и результата;
+- `artifacts.surface_clean_preview`: чистая поверхность без диагностических точек;
 - `artifacts.pixel_grid`: сетка в пиксельной системе до геопривязки;
-- `artifacts.pixel_contours`: изолинии GeoJSON в пикселях.
+- `artifacts.pixel_contours`: изолинии GeoJSON в пикселях;
+- `artifacts.local_cps3`: CPS-3 в локальных координатах растра с явным
+  предупреждением `not georeferenced`.
 
 Каждая ошибка сохраняется вместе с `failed_stage`; сбой одной страницы не должен
-останавливать пакет отчётов. CPS-3 экспорт выполняется только после определения
-аффинного преобразования и системы координат проекта.
+останавливать пакет отчётов. Локальный CPS-3 создаётся сразу, но для загрузки в
+пространственный проект его нужно привязать. CPS-3 с реальной CRS создаётся после
+определения аффинного преобразования и системы координат проекта.
 
 ## Проверка
 
@@ -116,8 +120,9 @@ The same workflow is exposed by FastAPI:
 - `POST /api/reports/{report_id}/maps/run` reruns map discovery and digitization
   for an already registered report, then rebuilds its result bundle.
 
-Artifact names are stable API identifiers: `surface_preview`, `pixel_grid`,
-`pixel_contours`, `cps3`, `xyz`, `prj` and `georeference_metadata`. The API never
+Artifact names are stable API identifiers: `surface_preview`,
+`surface_clean_preview`, `pixel_grid`, `pixel_contours`, `local_cps3`,
+`local_xyz`, `cps3`, `xyz`, `prj` and `georeference_metadata`. The API never
 serves arbitrary paths from a job manifest.
 
 Report map metadata includes an `artifact_id` and `download_url` for each source

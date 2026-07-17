@@ -12,6 +12,7 @@ from typing import Callable
 from PIL import Image
 
 from services.map_digitizer import PIPELINE_VERSION
+from services.map_digitizer.local_exports import materialize_local_exports
 from services.map_digitizer.assign_contour_values import (
     dominant_value_band,
     run as assign_values,
@@ -349,6 +350,11 @@ def run_pipeline(
         result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         return result
     result["stages"]["reconstruction"]["metrics"] = reconstruction
+    local_exports = materialize_local_exports(
+        reconstruction["files"]["grid"],
+        reconstruction["files"]["final_contours"],
+        reconstruction_dir,
+    )
     result["quality"] = quality_decision(assignment, reconstruction)
     result["status"] = result["quality"]["status"]
     result["total_latency_s"] = round(
@@ -361,6 +367,7 @@ def run_pipeline(
             "surface_preview": reconstruction["files"]["preview"],
             "pixel_grid": reconstruction["files"]["grid"],
             "pixel_contours": reconstruction["files"]["final_contours"],
+            **local_exports,
         }
     )
     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -424,18 +424,34 @@ with materials_tab:
                 st.warning(f"Предпросмотр недоступен: {Path(source['path']).name}")
     with digitized_column:
         st.subheader("Оцифрованные карты")
-        image_maps = [item for item in digitized_maps if str(item.get("media_type", "")).startswith("image/")]
+        clean_pages = {
+            item.get("page_id")
+            for item in digitized_maps
+            if item.get("name") == "surface_clean_preview"
+        }
+        image_maps = [
+            item
+            for item in digitized_maps
+            if str(item.get("media_type", "")).startswith("image/")
+            and not (
+                item.get("name") == "surface_preview"
+                and item.get("page_id") in clean_pages
+            )
+        ]
         if not image_maps:
             st.info("Оцифрованной версии пока нет.")
         for artifact in image_maps:
             preview = image_preview(artifact["path"])
             if preview is not None:
-                st.image(preview, caption=artifact.get("label") or artifact.get("name"), width="stretch")
+                quality = str(artifact.get("quality", {}).get("status") or "").casefold()
+                quality_label = "требует проверки" if quality == "review" else "принято" if quality == "accepted" else ""
+                caption = artifact.get("label") or artifact.get("name")
+                st.image(preview, caption=f"{caption} · {quality_label}" if quality_label else caption, width="stretch")
             else:
                 st.warning(f"Предпросмотр недоступен: {Path(artifact['path']).name}")
         for artifact_index, artifact in enumerate(digitized_maps):
             path = resolve_artifact_path(str(artifact.get("path") or ""))
-            if path.suffix.casefold() in {".geojson", ".json", ".gpkg", ".cps3", ".xyz", ".prj"}:
+            if path.suffix.casefold() in {".geojson", ".gpkg", ".cps3"}:
                 if path.is_file():
                     st.download_button(
                         artifact.get("label") or path.name,

@@ -300,6 +300,49 @@ class ApiTest(unittest.TestCase):
         self.assertTrue(payload["digitized"][0]["exists"])
         self.assertEqual(payload["digitized"][0]["size_bytes"], 7)
 
+    def test_maps_endpoint_merges_auxiliary_validation_run(self):
+        directory = self.runs / "375392"
+        auxiliary = self.runs / "375392_map_validation"
+        auxiliary.mkdir()
+        base_manifest = json.loads((directory / "job.json").read_text(encoding="utf-8"))
+        (auxiliary / "job.json").write_text(json.dumps(base_manifest), encoding="utf-8")
+        preview = auxiliary / "clean.png"
+        preview.write_bytes(b"clean")
+        map_agent = auxiliary / "map_agent"
+        map_agent.mkdir()
+        (map_agent / "result.json").write_text(
+            json.dumps(
+                {
+                    "status": "completed",
+                    "quality_status": "review",
+                    "jobs": [
+                        {
+                            "page_id": "page:7",
+                            "status": "review",
+                            "quality": {"status": "review"},
+                        }
+                    ],
+                    "artifacts": [
+                        {
+                            "name": "surface_clean_preview",
+                            "page_id": "page:7",
+                            "path": str(preview),
+                            "media_type": "image/png",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        payload = self.client.get("/api/reports/375392/maps").json()
+
+        self.assertEqual(payload["metrics"]["related_runs"], 2)
+        self.assertEqual(payload["digitized"][0]["quality"]["status"], "review")
+        download = self.client.get(payload["digitized"][0]["download_url"])
+        self.assertEqual(download.status_code, 200)
+        self.assertEqual(download.content, b"clean")
+
     @patch("app.routers.reports.reconcile_now")
     def test_scan_registers_and_starts_reports(self, reconcile):
         reconcile.return_value = {

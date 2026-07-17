@@ -54,6 +54,19 @@ def report_run_dir(report_id: str) -> Path:
     return path
 
 
+def related_map_run_dirs(report_id: str, source_root: Path) -> list[Path]:
+    """Return auxiliary map-validation runs belonging to the same report."""
+    directories = [report_run_dir(report_id)]
+    prefix = f"{report_id}_map_"
+    expected_root = source_root.resolve()
+    for manifest_path in settings.runs_root.glob(f"{prefix}*/job.json"):
+        manifest = read_json(manifest_path, {})
+        candidate_root = Path(str(manifest.get("source_root") or ""))
+        if candidate_root and candidate_root.resolve() == expected_root:
+            directories.append(manifest_path.parent.resolve())
+    return directories
+
+
 def status_payload(report_id: str) -> dict[str, Any]:
     directory = report_run_dir(report_id)
     manifest = read_json(directory / "job.json", {})
@@ -80,6 +93,8 @@ def list_reports() -> list[dict[str, Any]]:
     items = []
     for manifest_path in sorted(settings.runs_root.glob("*/job.json")):
         report_id = manifest_path.parent.name
+        if "_map_" in report_id and (settings.runs_root / report_id.split("_map_", 1)[0] / "job.json").exists():
+            continue
         payload = status_payload(report_id)
         items.append(
             {
@@ -127,13 +142,29 @@ def map_payload(report_id: str) -> dict[str, Any]:
     directory = report_run_dir(report_id)
     manifest = read_json(directory / "job.json", {})
     source_root = Path(str(manifest.get("source_root") or ""))
-    result = read_json(directory / "map_agent" / "result.json", {})
+    related_directories = related_map_run_dirs(report_id, source_root)
+    manifests = [read_json(item / "job.json", {}) for item in related_directories]
+    results = [read_json(item / "map_agent" / "result.json", {}) for item in related_directories]
+    result = results[0] if results else {}
+    jobs = [job for payload in results for job in payload.get("jobs", [])]
     processed_status = {
         str(job.get("page_id")): str(job.get("status"))
-        for job in result.get("jobs", [])
+        for job in jobs
+    }
+    quality_by_page = {
+        str(job.get("page_id")): dict(job.get("quality") or {})
+        for job in jobs
     }
     sources = []
-    for page in manifest.get("pages", []):
+    pages = []
+    seen_pages = set()
+    for payload in manifests:
+        for page in payload.get("pages", []):
+            key = (str(page.get("id")), str(page.get("relative_path")))
+            if key not in seen_pages:
+                pages.append(page)
+                seen_pages.add(key)
+    for page in pages:
         if page.get("content_type") != "map":
             continue
         if processed_status.get(str(page.get("id"))) in {
@@ -154,7 +185,12 @@ def map_payload(report_id: str) -> dict[str, Any]:
         )
 
     digitized = []
-    for artifact in result.get("artifacts", []):
+    seen_artifacts = set()
+    for artifact in [item for payload in results for item in payload.get("artifacts", [])]:
+        artifact_path = str(resolved_artifact_path(artifact.get("path")))
+        if artifact_path in seen_artifacts:
+            continue
+        seen_artifacts.add(artifact_path)
         if artifact.get("name") == "source_map":
             if processed_status.get(str(artifact.get("page_id"))) in {
                 "not_applicable",
@@ -180,6 +216,7 @@ def map_payload(report_id: str) -> dict[str, Any]:
         digitized.append(
             {
                 **artifact,
+                "quality": quality_by_page.get(str(artifact.get("page_id")), {}),
                 "exists": path.exists(),
                 "size_bytes": path.stat().st_size if path.exists() and path.is_file() else None,
             }
@@ -196,9 +233,15 @@ def map_payload(report_id: str) -> dict[str, Any]:
         "sources": sources,
         "digitized": digitized,
         "status": result.get("status", "not_digitized"),
-        "quality_status": result.get("quality_status"),
-        "metrics": result.get("metrics", {}),
-        "issues": result.get("issues", []),
+        "quality_status": "review" if any(item.get("quality_status") == "review" for item in results) else result.get("quality_status"),
+        "metrics": {
+            **result.get("metrics", {}),
+            "related_runs": len(related_directories),
+            "digitized_pages": len(
+                {item.get("page_id") for item in digitized if item.get("page_id")}
+            ),
+        },
+        "issues": [issue for payload in results for issue in payload.get("issues", [])],
     }
 
 
@@ -207,6 +250,7 @@ def report_map_artifact(report_id: str, artifact_id: str) -> tuple[Path, str]:
     manifest = read_json(directory / "job.json", {})
     source_root_value = manifest.get("source_root")
     source_root = Path(str(source_root_value)).resolve() if source_root_value else None
+    related_directories = related_map_run_dirs(report_id, source_root) if source_root else [directory]
     payload = map_payload(report_id)
     records = [*payload["sources"], *payload["digitized"]]
     record = next(
@@ -216,7 +260,7 @@ def report_map_artifact(report_id: str, artifact_id: str) -> tuple[Path, str]:
         raise HTTPException(404, "report_map_artifact_not_found")
     path = resolved_artifact_path(record.get("path"))
     if not path.is_file() or not (
-        path.is_relative_to(directory)
+        any(path.is_relative_to(item) for item in related_directories)
         or (source_root is not None and path.is_relative_to(source_root))
     ):
         raise HTTPException(404, "report_map_artifact_not_found")
