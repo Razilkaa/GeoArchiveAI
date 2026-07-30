@@ -412,6 +412,80 @@ def backfill_from_grid(
     return filled
 
 
+def reject_cross_structure_traces(
+    rows: list[dict],
+    grid: "object",
+    *,
+    alignment_floor: float = 0.35,
+    maximum_length: float,
+) -> list[dict]:
+    """Drop traces that cut across the structural plan instead of following it.
+
+    An isoline is a contour of the surface, so it runs along the grid's own
+    contour lines — perpendicular to the gradient. A profile artifact threaded
+    into the layer instead zigzags across those levels. Comparing each trace's
+    heading to the local contour direction of the rebuilt surface separates the
+    two cleanly. Only inferred levels are eligible: a trace carrying a read
+    label or a profile ordering is trusted even where the grid is locally flat.
+    """
+    finite = np.nan_to_num(grid.z, nan=float(np.nanmean(grid.z)))
+    grad_y, grad_x = np.gradient(finite)
+    grad_x_interp = RegularGridInterpolator(
+        (grid.y, grid.x), grad_x, bounds_error=False, fill_value=0.0
+    )
+    grad_y_interp = RegularGridInterpolator(
+        (grid.y, grid.x), grad_y, bounds_error=False, fill_value=0.0
+    )
+    defined = RegularGridInterpolator(
+        (grid.y, grid.x),
+        np.isfinite(grid.z).astype(float),
+        bounds_error=False,
+        fill_value=0.0,
+    )
+    trusted = {"direct_ocr", "profile_order"}
+    removed: list[dict] = []
+    survivors: list[dict] = []
+    for row in rows:
+        keep = True
+        length = row["geometry"].length
+        # A short scrap gets the stricter test, a long line the lenient one: a
+        # long trace running slightly across the plan is more likely a real
+        # contour the grid bends near a fold than a profile splinter.
+        floor = alignment_floor if length > 300.0 else alignment_floor + 0.10
+        if (
+            row.get("value_source") not in trusted
+            and length <= maximum_length
+        ):
+            samples = densify(np.asarray(row["geometry"].coords), 25.0)
+            segments = np.diff(samples, axis=0)
+            lengths = np.linalg.norm(segments, axis=1)
+            valid = lengths > 1e-6
+            if int(np.sum(valid)) >= 3:
+                midpoints = ((samples[:-1] + samples[1:]) / 2.0)[valid]
+                headings = segments[valid] / lengths[valid, None]
+                query = midpoints[:, ::-1]
+                gx = grad_x_interp(query)
+                gy = grad_y_interp(query)
+                magnitude = np.hypot(gx, gy)
+                usable = (magnitude > 1e-6) & (defined(query) > 0.5)
+                if int(np.sum(usable)) >= 3:
+                    contour_x = -gy[usable] / magnitude[usable]
+                    contour_y = gx[usable] / magnitude[usable]
+                    alignment = np.abs(
+                        contour_x * headings[usable, 0]
+                        + contour_y * headings[usable, 1]
+                    )
+                    if float(np.median(alignment)) < floor:
+                        keep = False
+        if keep:
+            survivors.append(row)
+        else:
+            row["rejection_reason"] = "crosses_structural_plan"
+            removed.append(row)
+    rows[:] = survivors
+    return removed
+
+
 def reject_mark_outliers(
     assignments: list[dict],
     depth_marks: np.ndarray,
@@ -1170,7 +1244,16 @@ def run(
                 spread_limit=0.9,
                 source="regrid_backfill",
             )
-            if regrid["backfilled"]:
+            # With a trustworthy surface in hand, drop the profile scraps that
+            # run across its structure — the chaotic bits that read as garbage
+            # against the smooth structural plan.
+            cross_structure = reject_cross_structure_traces(
+                preserved_rows,
+                grid,
+                maximum_length=max(400.0, min(target_size) * 0.06),
+            )
+            regrid["cross_structure_removed"] = len(cross_structure)
+            if regrid["backfilled"] or cross_structure:
                 unify_continuation_values(preserved_rows, max_gap=continuation_gap)
                 dissolved, extra = dissolve_and_resolve(
                     preserved_rows, max_gap=continuation_gap
