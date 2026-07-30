@@ -9,5 +9,6 @@ def test_openapi_exposes_artifact_and_rag_contracts() -> None:
     paths = schema["paths"]
     assert "/api/reports/{report_id}/artifacts/{artifact_id}" in paths
     assert "/api/reports/{report_id}/maps/artifacts/{artifact_id}" in paths
+    assert "/api/reports/{report_id}/maps/artifacts/{artifact_id}/preview" in paths
     assert "/api/reports/{report_id}/ask" in paths
     assert "/api/search" in paths

@@ -10,6 +10,7 @@ import numpy as np
 from pyproj import CRS
 
 from services.map_digitizer.export_cps3_grid import Grid, write_cps3, write_xyz
+from services.map_digitizer.export_cps3_lines import write_cps3_lines
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -42,6 +43,7 @@ def materialize_local_exports(
     xyz_path = output_dir / "surface_local_pixels.xyz"
     preview_path = output_dir / "surface_clean_preview.png"
     metadata_path = output_dir / "surface_local_pixels.json"
+    lines_path = output_dir / "contours_local_pixels.cps3"
     write_cps3(
         grid,
         cps3_path,
@@ -49,6 +51,11 @@ def materialize_local_exports(
         crs_label="LOCAL_PIXEL_COORDINATES (not georeferenced)",
     )
     write_xyz(grid, xyz_path)
+    write_cps3_lines(
+        contours,
+        lines_path,
+        crs_label="LOCAL_PIXEL_COORDINATES (not georeferenced)",
+    )
 
     fig, axis = plt.subplots(figsize=(11, 9), dpi=140)
     fill = axis.pcolormesh(
@@ -103,6 +110,7 @@ def materialize_local_exports(
                     "cps3": str(cps3_path),
                     "xyz": str(xyz_path),
                     "preview": str(preview_path),
+                    "lines_cps3": str(lines_path),
                 },
             },
             ensure_ascii=False,
@@ -115,4 +123,5 @@ def materialize_local_exports(
         "local_cps3": str(cps3_path),
         "local_xyz": str(xyz_path),
         "local_export_metadata": str(metadata_path),
+        "local_cps3_lines": str(lines_path),
     }

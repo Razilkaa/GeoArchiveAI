@@ -155,11 +155,15 @@ def _crossings(report_id: str, page_id: str) -> tuple[str, list[dict[str, Any]]]
 
 def profile_crossings(report_id: str, page_id: str) -> dict[str, Any]:
     crs, crossings = _crossings(report_id, page_id)
+    _, _, source, _ = _page_context(report_id, page_id)
+    with Image.open(source) as image:
+        raster_size = [int(image.width), int(image.height)]
     return {
         "report_id": report_id,
         "page_id": page_id,
         "target_crs": crs,
         "crossings": crossings,
+        "raster_size": raster_size,
     }
 
 

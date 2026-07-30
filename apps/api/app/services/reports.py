@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
+from PIL import Image, ImageOps
 
 from app.config import settings
 
@@ -24,6 +25,9 @@ MEDIA_TYPES = {
     ".xyz": "text/plain",
     ".prj": "text/plain",
     ".npz": "application/octet-stream",
+    ".gpkg": "application/geopackage+sqlite3",
+    ".csv": "text/csv",
+    ".zip": "application/zip",
 }
 
 
@@ -202,6 +206,7 @@ def map_payload(report_id: str) -> dict[str, Any]:
         sources.append(
             {
                 "page_id": page.get("id"),
+                "page_number": page.get("page_number"),
                 "label": f"Исходная карта · {Path(str(page.get('relative_path') or '')).name}",
                 "path": str(path),
                 "media_type": MEDIA_TYPES.get(path.suffix.casefold(), "application/octet-stream"),
@@ -226,6 +231,14 @@ def map_payload(report_id: str) -> dict[str, Any]:
                     0,
                     {
                         "page_id": artifact.get("page_id"),
+                        "page_number": next(
+                            (
+                                page.get("page_number")
+                                for page in pages
+                                if str(page.get("id")) == str(artifact.get("page_id"))
+                            ),
+                            None,
+                        ),
                         "label": artifact.get("label") or f"Исходная карта · {path.name}",
                         "path": str(path),
                         "media_type": artifact.get("media_type")
@@ -241,6 +254,14 @@ def map_payload(report_id: str) -> dict[str, Any]:
         digitized.append(
             {
                 **artifact,
+                "page_number": next(
+                    (
+                        page.get("page_number")
+                        for page in pages
+                        if str(page.get("id")) == str(artifact.get("page_id"))
+                    ),
+                    None,
+                ),
                 "quality": quality_by_page.get(str(artifact.get("page_id")), {}),
                 "exists": path.exists(),
                 "size_bytes": path.stat().st_size if path.exists() and path.is_file() else None,
@@ -253,6 +274,10 @@ def map_payload(report_id: str) -> dict[str, Any]:
             item["download_url"] = (
                 f"/api/reports/{report_id}/maps/artifacts/{artifact_id}"
             )
+            if str(item.get("media_type") or "").startswith("image/"):
+                item["preview_url"] = (
+                    f"/api/reports/{report_id}/maps/artifacts/{artifact_id}/preview"
+                )
     return {
         "report_id": report_id,
         "sources": sources,
@@ -299,3 +324,34 @@ def report_map_artifact(report_id: str, artifact_id: str) -> tuple[Path, str]:
         or MEDIA_TYPES.get(path.suffix.casefold(), "application/octet-stream")
     )
     return path, media_type
+
+
+def report_map_artifact_preview(report_id: str, artifact_id: str) -> Path:
+    """Return a cached, browser-sized JPEG without exposing storage paths."""
+    source, media_type = report_map_artifact(report_id, artifact_id)
+    if not media_type.startswith("image/"):
+        raise HTTPException(415, "map_artifact_preview_requires_image")
+    stat = source.stat()
+    cache_dir = report_run_dir(report_id) / "map_previews"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / (
+        f"{artifact_id}-{stat.st_size}-{stat.st_mtime_ns}.jpg"
+    )
+    if cache_path.exists():
+        return cache_path
+    try:
+        with Image.open(source) as opened:
+            opened.draft("RGB", (1600, 1200))
+            image = ImageOps.exif_transpose(opened)
+            image.thumbnail((1600, 1200), Image.Resampling.LANCZOS)
+            if image.mode != "RGB":
+                converted = Image.new("RGB", image.size, "white")
+                if "A" in image.getbands():
+                    converted.paste(image, mask=image.getchannel("A"))
+                else:
+                    converted.paste(image)
+                image = converted
+            image.save(cache_path, "JPEG", quality=82, optimize=True)
+    except (OSError, ValueError) as error:
+        raise HTTPException(422, "map_artifact_preview_failed") from error
+    return cache_path

@@ -361,18 +361,29 @@ class JobWorker:
                 ),
             ]
             if self.config.ocr_api_url:
-                stages.insert(
-                    1,
+                def run_maps_and_refresh_bundle() -> dict:
+                    result = run_report_maps(
+                        self.manifest_path,
+                        str(self.config.ocr_api_url),
+                        workers=self.config.vision_workers,
+                    )
+                    # RAG becomes available as soon as the first bundle is built.
+                    # Refresh it after the slower map pass without blocking search.
+                    build_bundle(
+                        self.manifest_path,
+                        self._ragflow_path(),
+                        self._agents_path() if self._agents_path().exists() else None,
+                        self._maps_path(),
+                    )
+                    return result
+
+                stages.append(
                     (
                         "map_digitization",
                         self._maps_valid,
-                        lambda: run_report_maps(
-                            self.manifest_path,
-                            str(self.config.ocr_api_url),
-                            workers=self.config.vision_workers,
-                        ),
+                        run_maps_and_refresh_bundle,
                         False,
-                    ),
+                    )
                 )
             else:
                 self.state["stages"]["map_digitization"].update(

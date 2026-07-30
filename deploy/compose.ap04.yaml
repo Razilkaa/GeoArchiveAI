@@ -15,7 +15,7 @@ x-app-environment: &app-environment
   RAGFLOW_TOKEN_FILE: /run/secrets/ragflow_token.txt
   LLM_CREDENTIALS_FILE: /run/secrets/tokent.txt
   GEOARCHIVE_LLM_MODEL: openai/gpt-4o-mini
-  ENABLE_ENRICHMENT: "true"
+  ENABLE_ENRICHMENT: "false"
   AUTO_INTAKE_ENABLED: "false"
   JOB_EXECUTION_MODE: queue
   S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://host.docker.internal:19100}

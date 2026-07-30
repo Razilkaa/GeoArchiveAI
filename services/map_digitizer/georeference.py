@@ -27,6 +27,7 @@ from shapely.geometry import LineString, Point
 from shapely.affinity import affine_transform
 
 from services.map_digitizer.profile_value_propagation import extract_profile_lines
+from services.map_digitizer.export_cps3_lines import write_cps3_lines
 from services.map_digitizer.survey_profiles import (
     _profile_number_column,
     profile_number_variants,
@@ -634,6 +635,14 @@ def georeference(
         target = output_dir / (product.stem + "_ck42.gpkg")
         frame.to_file(target, driver="GPKG")
         exported[product.stem] = str(target)
+        if any(
+            geometry is not None
+            and geometry.geom_type in {"LineString", "MultiLineString"}
+            for geometry in frame.geometry
+        ):
+            lines_target = output_dir / (product.stem + "_ck42_lines.cps3")
+            write_cps3_lines(frame, lines_target, crs_label=str(crs))
+            exported[product.stem + "_cps3_lines"] = str(lines_target)
 
     world_suffixes = {
         ".jpg": ".jgw",

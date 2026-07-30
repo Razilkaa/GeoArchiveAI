@@ -22,11 +22,13 @@ export type Bundle = {
 export type MapArtifact = {
   artifact_id: string;
   page_id?: string;
+  page_number?: number;
   name?: string;
   label?: string;
   path?: string;
   media_type?: string;
   download_url: string;
+  preview_url?: string;
   exists?: boolean;
   status?: string;
   content_type?: string;
@@ -54,6 +56,7 @@ export type ProfileCrossingsPayload = {
   page_id: string;
   target_crs: string;
   crossings: ProfileCrossing[];
+  raster_size?: [number, number];
 };
 export type ProfileAnchor = {
   pixel: [number, number];

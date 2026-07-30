@@ -27,6 +27,7 @@ from app.services.reports import (
     map_payload,
     read_json,
     report_map_artifact,
+    report_map_artifact_preview,
     report_run_dir,
     status_payload,
 )
@@ -173,6 +174,12 @@ async def georeference_report_map_by_profiles(
 def download_report_map_artifact(report_id: str, artifact_id: str) -> FileResponse:
     path, media_type = report_map_artifact(report_id, artifact_id)
     return FileResponse(path, media_type=media_type)
+
+
+@router.get("/reports/{report_id}/maps/artifacts/{artifact_id}/preview")
+def preview_report_map_artifact(report_id: str, artifact_id: str) -> FileResponse:
+    path = report_map_artifact_preview(report_id, artifact_id)
+    return FileResponse(path, media_type="image/jpeg")
 
 
 @router.post("/reports/{report_id}/maps/run", status_code=202)

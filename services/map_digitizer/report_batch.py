@@ -10,12 +10,14 @@ from pathlib import Path
 from typing import Callable
 
 import fitz
+import geopandas as gpd
 import numpy as np
 from PIL import Image
 
 from geoarchive.settings import load_settings
 from services.map_digitizer import PIPELINE_VERSION
 from services.map_digitizer.pipeline import file_sha256, run_pipeline
+from services.map_digitizer.export_cps3_lines import write_cps3_lines
 from services.map_digitizer.survey_profiles import find_survey_shape
 
 
@@ -30,6 +32,31 @@ IMAGE_MEDIA_TYPES = {
     ".tif": "image/tiff",
     ".tiff": "image/tiff",
 }
+
+
+def materialize_cps3_line_artifacts(result: dict) -> None:
+    """Upgrade cached map results with line exports without rerunning geometry."""
+    artifact_paths = result.setdefault("artifacts", {})
+    sources = {
+        "local_cps3_lines": artifact_paths.get("pixel_contours"),
+        "georef_digitized_isolines_by_level_cps3_lines": artifact_paths.get(
+            "georef_digitized_isolines_by_level"
+        ),
+        "georef_reconstructed_contours_pixels_cps3_lines": artifact_paths.get(
+            "georef_reconstructed_contours_pixels"
+        ),
+    }
+    for target_name, source_value in sources.items():
+        if artifact_paths.get(target_name) or not source_value:
+            continue
+        source = Path(str(source_value))
+        if not source.is_file():
+            continue
+        suffix = "_lines.cps3" if source.suffix.casefold() == ".gpkg" else ".cps3"
+        target = source.with_name(source.stem + suffix)
+        frame = gpd.read_file(source)
+        write_cps3_lines(frame, target)
+        artifact_paths[target_name] = str(target)
 
 
 def reusable_result(path: Path, source: Path) -> dict | None:
@@ -166,7 +193,11 @@ def run_report_maps(
         "local_export_metadata", "georef_raster", "georef_world_file",
         "georef_projection", "georef_footprint", "georef_metrics",
         "georef_package", "georef_delivery", "georef_cps3", "georef_xyz",
-        "georef_grid_projection",
+        "georef_grid_projection", "local_cps3_lines",
+        "georef_digitized_isolines_by_level",
+        "georef_reconstructed_contours_pixels",
+        "georef_digitized_isolines_by_level_cps3_lines",
+        "georef_reconstructed_contours_pixels_cps3_lines",
     }
     for item in existing_result.get("artifacts", []):
         if (
@@ -285,6 +316,7 @@ def run_report_maps(
             if page_id in prefetched_errors:
                 raise prefetched_errors[page_id]
             result, reused = prefetched_results[page_id]
+            materialize_cps3_line_artifacts(result)
             routed_type = str(page.get("content_type") or "map")
             effective_status = str(result.get("status"))
             effective_quality = dict(result.get("quality") or {})
@@ -327,6 +359,7 @@ def run_report_maps(
                     ("local_cps3", "CPS-3 Grid (локальная система листа)", "text/plain"),
                     ("local_xyz", "XYZ (локальная система листа)", "text/plain"),
                     ("local_export_metadata", "Метаданные локального Grid", "application/json"),
+                    ("local_cps3_lines", "CPS-3 Lines (локальные координаты листа)", "text/plain"),
                 ):
                     path = result.get("artifacts", {}).get(name)
                     if path:
@@ -346,6 +379,10 @@ def run_report_maps(
                     ("georef_footprint", "Контур покрытия"),
                     ("georef_metrics", "Метрики геопривязки"),
                     ("georef_package", "Архив привязки ArcGIS / Petrel"),
+                    ("georef_digitized_isolines_by_level", "Привязанные изолинии GeoPackage"),
+                    ("georef_reconstructed_contours_pixels", "Привязанные восстановленные линии GeoPackage"),
+                    ("georef_digitized_isolines_by_level_cps3_lines", "Привязанные изолинии CPS-3 Lines"),
+                    ("georef_reconstructed_contours_pixels_cps3_lines", "Привязанные восстановленные линии CPS-3 Lines"),
                 ):
                     path = result.get("artifacts", {}).get(name)
                     if path:
