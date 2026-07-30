@@ -21,6 +21,7 @@ from services.map_digitizer.assign_contour_values import (
 from services.map_digitizer.depth_mark_surface import run as build_depth_surface
 from services.map_digitizer.georeference import georeference as run_georeference
 from services.map_digitizer.ocr_client import request_ocr
+from services.map_digitizer.profile_scheme import mask_trace_file
 from services.map_digitizer.trace_guided_surface import run as reconstruct_trace_guided
 from services.map_digitizer.trace_map_isolines import trace
 
@@ -206,6 +207,8 @@ def run_pipeline(
     ocr_client: Callable[[Path, str, float], dict] = request_ocr,
     inventory_id: str | None = None,
     survey_shape_path: Path | None = None,
+    scheme_image_path: Path | None = None,
+    scheme_ocr_path: Path | None = None,
     try_raster_georeference: bool = False,
 ) -> dict:
     image_path = image_path.resolve()
@@ -362,6 +365,29 @@ def run_pipeline(
     )
     trace_metrics = json.loads(summary_path.read_text(encoding="utf-8"))
     result["stages"]["trace"]["metrics"] = trace_metrics
+
+    # Erase seismic-profile ink before values are assigned: the report's own
+    # profile scheme (a sibling page) registers onto this sheet by shared profile
+    # numbers, and its projected network flags the along-profile traces. Applied
+    # here, on the raw polylines, so the profiles never reach dissolve where they
+    # would fuse with real isolines. Skipped silently when no scheme is supplied
+    # or the registration fails its gate -- the sheet then digitises unchanged.
+    if (
+        scheme_image_path is not None
+        and scheme_ocr_path is not None
+        and Path(scheme_image_path).exists()
+        and Path(scheme_ocr_path).exists()
+    ):
+        scheme_report = execute(
+            "profile_scheme_mask",
+            lambda: mask_trace_file(
+                trace_dir / "isolines.json",
+                map_ocr=ocr_path,
+                scheme_ocr=scheme_ocr_path,
+                scheme_image=scheme_image_path,
+            ),
+        )
+        result["stages"]["profile_scheme_mask"]["metrics"] = scheme_report
 
     assignment_dir = output_dir / "assignment"
     try:

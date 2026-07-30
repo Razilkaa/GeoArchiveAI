@@ -411,3 +411,51 @@ def profile_scheme_mask(
     report["decisions"] = decisions
     report["status"] = "applied"
     return report
+
+
+# --------------------------------------------------------------------------- #
+# 7. Pipeline hook: filter a trace file in place
+# --------------------------------------------------------------------------- #
+def mask_trace_file(
+    isolines_path: Path,
+    *,
+    map_ocr: Path,
+    scheme_ocr: Path,
+    scheme_image: Path,
+) -> dict:
+    """Drop profile polylines from a trace file, using the report's scheme.
+
+    Reads ``polylines_xy``, runs the gated mask, and rewrites the file with the
+    flagged traces removed so both value assignment and reconstruction see the
+    cleaned set.  When the mask is skipped (no scheme match, failed gate) or
+    removes nothing, the file is left byte-for-byte untouched -- the hook never
+    degrades a sheet the scheme cannot vouch for.  Returns the mask report minus
+    its per-trace decisions, plus ``kept``/``removed_count`` for logging.
+    """
+    payload = json.loads(Path(isolines_path).read_text(encoding="utf-8"))
+    polylines = [np.asarray(p, dtype=float) for p in payload["polylines_xy"]]
+    gray = cv2.imdecode(
+        np.fromfile(str(scheme_image), dtype=np.uint8), cv2.IMREAD_GRAYSCALE
+    )
+    if gray is None:
+        return {"status": "scheme_image_unreadable", "removed_count": 0}
+
+    report = profile_scheme_mask(
+        scheme_ocr=Path(scheme_ocr),
+        map_ocr=Path(map_ocr),
+        scheme_gray=gray,
+        traces=polylines,
+    )
+    removed = set(report.get("removed") or [])
+    if report["status"] == "applied" and removed:
+        payload["polylines_xy"] = [
+            poly for index, poly in enumerate(payload["polylines_xy"])
+            if index not in removed
+        ]
+        payload["n_polylines"] = len(payload["polylines_xy"])
+        Path(isolines_path).write_text(json.dumps(payload), encoding="utf-8")
+
+    report.pop("decisions", None)
+    report["removed_count"] = len(removed)
+    report["kept"] = len(polylines) - len(removed)
+    return report
