@@ -112,8 +112,7 @@ function MapsView({ reportId }: { reportId: string }) {
             const location = (item?.path || "")
               .split(/[\\/]/)
               .filter(Boolean)
-              .slice(-2)
-              .join(" / ");
+              .at(-1) || "";
             const sheet = item?.page_number ? `Лист ${item.page_number}` : value;
             return <option key={value} value={value}>
               {pages.length > 1 && location ? `${sheet} · ${location}` : sheet}
