@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import tarfile
@@ -27,10 +28,9 @@ def _safe_destination(root: Path, relative: str) -> Path:
 
 
 def _seven_zip() -> Path:
-    candidates = (
-        Path(r"C:\Program Files\7-Zip\7z.exe"),
-        Path(r"C:\Program Files (x86)\7-Zip\7z.exe"),
-    )
+    configured = os.environ.get("SEVEN_ZIP_PATH")
+    discovered = shutil.which("7z") or shutil.which("7zz")
+    candidates = tuple(Path(value) for value in (configured, discovered) if value)
     executable = next((path for path in candidates if path.exists()), None)
     if executable is None:
         raise ValueError("7-Zip is required for RAR/7z archives")
@@ -285,9 +285,11 @@ def intake(inbox: Path, staging: Path, runs: Path) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Register report archives without external processing")
-    parser.add_argument("--inbox", type=Path, default=Path(r"C:\FINAM\Conference\reports_inbox"))
-    parser.add_argument("--staging", type=Path, default=Path(r"C:\FINAM\Conference\reports_staging"))
-    parser.add_argument("--runs", type=Path, default=Path(r"C:\FINAM\Conference\runs"))
+    project_root = Path(os.environ.get("GEOARCHIVE_ROOT", Path(__file__).parents[1]))
+    data_root = Path(os.environ.get("GEOARCHIVE_DATA_ROOT", project_root))
+    parser.add_argument("--inbox", type=Path, default=Path(os.environ.get("GEOARCHIVE_INBOX_ROOT", data_root / "reports_inbox")))
+    parser.add_argument("--staging", type=Path, default=Path(os.environ.get("GEOARCHIVE_STAGING_ROOT", data_root / "reports_staging")))
+    parser.add_argument("--runs", type=Path, default=Path(os.environ.get("GEOARCHIVE_RUNS_ROOT", data_root / "runs")))
     args = parser.parse_args()
     print(intake(args.inbox, args.staging, args.runs))
 

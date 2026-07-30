@@ -6,11 +6,60 @@ straight components are profiles/frame, and the remaining skeleton is joined
 through gaps only when endpoint tangents agree.
 """
 from __future__ import annotations
+import math
+
 
 import cv2
 import numpy as np
 from scipy.spatial import cKDTree
 from skimage.morphology import skeletonize
+
+
+def _prune_spurs(skeleton: np.ndarray, max_length: int, rounds: int = 4) -> np.ndarray:
+    """Remove short dead-end branches so contours stop fragmenting at them.
+
+    Depth ticks, label strokes and skeletonization noise touch a contour and
+    leave a stub. Every stub is a junction, and a junction splits the contour
+    into separate walks, so a contour crossed ten times arrives as eleven
+    fragments that later filters then discard piecewise. Cutting the stubs
+    first keeps the contour a single path.
+    """
+    pruned = skeleton.copy()
+    offsets = (
+        (-1, -1), (-1, 0), (-1, 1), (0, -1),
+        (0, 1), (1, -1), (1, 0), (1, 1),
+    )
+    for _ in range(rounds):
+        pixels = set(map(tuple, np.argwhere(pruned)))
+        if not pixels:
+            break
+
+        def neighbours(point: tuple[int, int]) -> list[tuple[int, int]]:
+            y, x = point
+            return [(y + dy, x + dx) for dy, dx in offsets if (y + dy, x + dx) in pixels]
+
+        degree = {point: len(neighbours(point)) for point in pixels}
+        removed: list[tuple[int, int]] = []
+        for endpoint in [point for point, count in degree.items() if count == 1]:
+            branch = [endpoint]
+            previous, current = None, endpoint
+            while len(branch) <= max_length:
+                candidates = [item for item in neighbours(current) if item != previous]
+                if len(candidates) != 1:
+                    break
+                previous, current = current, candidates[0]
+                if degree[current] > 2:
+                    break
+                branch.append(current)
+            # Only cut when the branch really ends in a junction: an isolated
+            # short line is linework, not a stub.
+            if len(branch) <= max_length and degree[current] > 2:
+                removed.extend(branch)
+        if not removed:
+            break
+        rows, columns = zip(*removed)
+        pruned[np.asarray(rows), np.asarray(columns)] = False
+    return pruned
 
 
 def _walk_skeleton(skeleton: np.ndarray) -> list[list[tuple[int, int]]]:
@@ -59,8 +108,49 @@ def _walk_skeleton(skeleton: np.ndarray) -> list[list[tuple[int, int]]]:
     return paths
 
 
+def _arc_offset(line: np.ndarray, at_start: bool, target: np.ndarray, count: int = 28) -> float:
+    """How far ``target`` sits off the arc this line end is drawing.
+
+    Direction alone cannot tell a dashed contour continuing from the next
+    contour running beside it: both point the same way. Their curvature does
+    differ, and a neighbour sits off the arc by the contour spacing, so fitting
+    a circle to the end of a stroke and measuring the target against it
+    separates the two.
+    """
+    segment = line[:count] if at_start else line[-count:][::-1]
+    if len(segment) < 6:
+        return 0.0
+    x, y = segment[:, 0], segment[:, 1]
+    matrix = np.column_stack([x, y, np.ones(len(segment))])
+    rhs = -(x**2 + y**2)
+    try:
+        solution, *_ = np.linalg.lstsq(matrix, rhs, rcond=None)
+    except np.linalg.LinAlgError:
+        return 0.0
+    center = np.array([-solution[0] / 2.0, -solution[1] / 2.0])
+    squared = float(center[0] ** 2 + center[1] ** 2 - solution[2])
+    span = float(np.linalg.norm(segment[0] - segment[-1]))
+    if squared <= 0.0 or math.sqrt(squared) > span * 40.0:
+        # Effectively straight: measure against the fitted line instead, so a
+        # long flat stroke is not judged by a numerically unstable circle.
+        direction = segment[0] - segment[-1]
+        norm = float(np.linalg.norm(direction))
+        if norm == 0.0:
+            return 0.0
+        direction = direction / norm
+        normal = np.array([-direction[1], direction[0]])
+        return abs(float(normal @ (target - segment[0])))
+    radius = math.sqrt(squared)
+    return abs(float(np.linalg.norm(target - center)) - radius)
+
+
 def _stitch(
-    paths: list[np.ndarray], *, max_gap: float, minimum_alignment: float
+    paths: list[np.ndarray],
+    *,
+    max_gap: float,
+    minimum_alignment: float,
+    arc_tolerance: float | None = None,
+    arc_minimum_gap: float = 12.0,
 ) -> list[np.ndarray]:
     lines: list[np.ndarray | None] = list(paths)
 
@@ -103,6 +193,16 @@ def _stitch(
                 direction = bridge / distance
                 if min(float(np.dot(tangent_a, direction)), float(np.dot(-tangent_b, direction))) < minimum_alignment:
                     continue
+            # Short joins continue a stroke that was merely nicked; it is the
+            # long reaches that can land on the contour running alongside, so
+            # only those are worth paying the arc test's false rejections for.
+            if arc_tolerance is not None and distance > arc_minimum_gap:
+                tolerance = max(arc_tolerance, distance * 0.40)
+                if (
+                    _arc_offset(first, start_a, point_b) > tolerance
+                    or _arc_offset(second, start_b, point_a) > tolerance
+                ):
+                    continue
             joined_a = first[::-1] if start_a else first
             joined_b = second if start_b else second[::-1]
             lines[line_a] = np.vstack([joined_a, joined_b])
@@ -112,11 +212,17 @@ def _stitch(
     return [line for line in lines if line is not None]
 
 
-def trace_source_geometry(gray: np.ndarray) -> dict:
+def trace_source_geometry(
+    gray: np.ndarray,
+    *,
+    component_span_factor: float = 80.0,
+    profile_length_factor: float = 750.0,
+    output_length_factor: float = 100.0,
+) -> dict:
     ink = np.uint8(gray < 128)
     height, width = ink.shape
     resolution_scale = max(0.5, min(height, width) / 8_000.0)
-    min_component_span = max(55, round(110 * resolution_scale))
+    min_component_span = max(40, round(component_span_factor * resolution_scale))
 
     count, labels, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
     retained = np.zeros_like(ink)
@@ -164,7 +270,7 @@ def trace_source_geometry(gray: np.ndarray) -> dict:
         1,
         np.pi / 360,
         threshold=max(150, round(300 * resolution_scale)),
-        minLineLength=max(250, round(500 * resolution_scale)),
+        minLineLength=max(250, round(profile_length_factor * resolution_scale)),
         maxLineGap=max(6, round(12 * resolution_scale)),
     )
     segment_count = 0
@@ -172,6 +278,10 @@ def trace_source_geometry(gray: np.ndarray) -> dict:
         for x1, y1, x2, y2 in segments.reshape(-1, 4):
             cv2.line(profile_mask, (x1, y1), (x2, y2), 1, max(3, round(9 * resolution_scale)))
             segment_count += 1
+    # Removing the whole corridor also cuts every contour that crosses it, and
+    # restoring those crossings by stroke orientation was measured end to end:
+    # it recovers mask ink but yields no better contour layer, because the
+    # wobbly profile ink it keeps returns as decoration. The plain band stays.
     retained[profile_mask > 0] = 0
     border = max(30, round(60 * resolution_scale))
     retained[:border] = retained[-border:] = 0
@@ -183,20 +293,33 @@ def trace_source_geometry(gray: np.ndarray) -> dict:
         if max(stats[component, 2], stats[component, 3]) >= max(50, round(100 * resolution_scale)):
             linework[labels == component] = 1
 
-    skeleton = skeletonize(linework > 0)
+    skeleton = _prune_spurs(
+        skeletonize(linework > 0), max_length=max(8, round(18 * resolution_scale))
+    )
+    # Short chains between two junctions are what connects a contour across a
+    # crossing, so they must reach the stitcher rather than be filtered out by
+    # length beforehand. The floor stays high enough to keep skeleton noise in
+    # dense label areas out: below it, stray chains stitch into wandering paths
+    # that the decoration filters then have to throw away wholesale.
     paths = [
         np.asarray([(x, y) for y, x in path], dtype=float)
         for path in _walk_skeleton(skeleton)
         if len(path) >= 25
     ]
     fragment_count = len(paths)
+    # Merely widening the angle window to bridge the dashed Volga-Ural contours
+    # was measured and rejected: it hopped between neighbouring contours. The
+    # arc test below is what lets the window open, because a neighbour sits off
+    # the arc even when it points the same way.
     for gap, alignment in ((6, 0.82), (45, 0.93), (130, 0.965), (210, 0.985)):
         paths = _stitch(
             paths,
             max_gap=gap * resolution_scale,
             minimum_alignment=alignment,
+            arc_tolerance=14.0 * resolution_scale,
+            arc_minimum_gap=60.0 * resolution_scale,
         )
-    minimum_length = max(75, round(150 * resolution_scale))
+    minimum_length = max(60, round(output_length_factor * resolution_scale))
     paths = [path for path in paths if len(path) >= minimum_length]
     simplified = []
     for path in paths:

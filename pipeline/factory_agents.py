@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import time
 from collections import defaultdict
@@ -379,8 +380,8 @@ def main() -> None:
     parser.add_argument("--token-file", required=True, type=Path)
     parser.add_argument("--credentials-file", required=True, type=Path)
     parser.add_argument("--model", default="openai/gpt-4o-mini")
-    parser.add_argument("--base-url", default="https://ragflow-dev.finam.ru/api/v1")
-    parser.add_argument("--proxy", default="socks5h://127.0.0.1:7777")
+    parser.add_argument("--base-url", default=os.environ.get("RAGFLOW_URL"))
+    parser.add_argument("--proxy", default=os.environ.get("RAGFLOW_PROXY"))
     args = parser.parse_args()
     print(
         run_agents(

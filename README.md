@@ -8,14 +8,27 @@
 - маски изолиний и сейсмических профилей;
 - оцифрованную карту, GeoJSON и CPS-3 Grid.
 
-## Запуск
+## Локальный запуск
 
 ```powershell
 scripts\start_geoarchive.cmd
 ```
 
-- UI: http://127.0.0.1:8501
+- UI: http://127.0.0.1:5173
 - Swagger: http://127.0.0.1:8765/docs
+
+Новый React UI находится в `apps/web/` и локально запускается через
+`npm.cmd run dev`. Streamlit сохранён как совместимый клиент на период перехода.
+
+## Серверный запуск
+
+Скопируйте `.env.example` в `.env`, заполните URL RAGFlow и выполните:
+
+```powershell
+docker compose --env-file .env -f deploy/compose.yaml up -d --build
+```
+
+Подробности и требования к GPU описаны в `deploy/README.md`.
 
 Новые отчёты кладутся в `reports_inbox/` и регистрируются автоматически.
 
@@ -23,7 +36,10 @@ scripts\start_geoarchive.cmd
 
 ```text
 apps/api/                 FastAPI и интеграция с RAGFlow
-apps/web/                 Streamlit UI
+apps/web/                 React UI и временный Streamlit-клиент
+geoarchive/               единая runtime-конфигурация
+evaluation/rag/           gold set и regression-evaluator RAGFlow
+deploy/                   Docker Compose для web/API/worker/OCR
 pipeline/                 обработка полного отчёта
 services/ocr/             GPU PaddleOCR API
 services/map_digitizer/   единственный production-пайплайн карт

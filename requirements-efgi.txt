@@ -1,0 +1,2 @@
+-r requirements-pipeline.txt
+playwright>=1.55,<2

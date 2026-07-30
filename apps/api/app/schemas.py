@@ -32,6 +32,16 @@ class MapControlPoint(BaseModel):
 
 class MapGeoreferenceRequest(BaseModel):
     target_crs: str
-    control_points: list[MapControlPoint] = Field(min_length=3)
+    control_points: list[MapControlPoint] = Field(min_length=2)
     cell_size: float | None = Field(default=None, gt=0)
     name: str = "digitized_surface"
+
+
+class ReportMapProfileAnchor(BaseModel):
+    pixel: tuple[float, float]
+    crossing_key: str
+
+
+class ReportMapProfileGeoreferenceRequest(BaseModel):
+    page_id: str
+    anchors: list[ReportMapProfileAnchor] = Field(min_length=2, max_length=8)

@@ -1,0 +1,24 @@
+name: geoarchive-objectstore
+
+services:
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: geoarchive-objectstore-minio
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    ports:
+      - "19100:9000"
+      - "19101:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
+    volumes:
+      - /var/lib/geoarchive-objectstore:/data
+    mem_limit: 2g
+    cpus: 2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20s

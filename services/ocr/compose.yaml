@@ -1,7 +1,9 @@
 services:
   paddle-ocr:
-    build: .
-    image: geoarchive/paddle-ocr:3.1.0
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    image: geoarchive/paddle-ocr:3.1.0-production
     container_name: geoarchive-paddle-ocr
     restart: unless-stopped
     ports:
@@ -28,7 +30,7 @@ services:
               device_ids: ["1"]
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
       interval: 20s
       timeout: 8s
       retries: 15

@@ -11,6 +11,7 @@ from typing import Callable
 
 from PIL import Image
 
+from geoarchive.settings import load_settings
 from services.map_digitizer import PIPELINE_VERSION
 from services.map_digitizer.local_exports import materialize_local_exports
 from services.map_digitizer.assign_contour_values import (
@@ -18,11 +19,13 @@ from services.map_digitizer.assign_contour_values import (
     run as assign_values,
 )
 from services.map_digitizer.depth_mark_surface import run as build_depth_surface
+from services.map_digitizer.georeference import georeference as run_georeference
 from services.map_digitizer.ocr_client import request_ocr
 from services.map_digitizer.trace_guided_surface import run as reconstruct_trace_guided
 from services.map_digitizer.trace_map_isolines import trace
 
 Image.MAX_IMAGE_PIXELS = None
+DEFAULT_SETTINGS = load_settings()
 
 
 def file_sha256(path: Path) -> str:
@@ -48,6 +51,15 @@ def assess_ocr_eligibility(
             negative_values.append(value / 1000.0 if value >= 100.0 else value)
         elif re.fullmatch(r"[0-9]{3,4}", text) and 500 <= int(text) <= 5000:
             profile_measurements += 1
+    depth_mark_candidates = sum(
+        1
+        for line in ocr_payload.get("lines") or []
+        if float(line.get("score") or 0.0) >= 0.8
+        and re.fullmatch(
+            r"[0-9]+\.[0-9]{2}",
+            str(line.get("text", "")).strip().replace(",", "."),
+        )
+    )
     band = dominant_value_band(negative_values, 0.1)
     retained = (
         [value for value in negative_values if band[0] <= value <= band[1]]
@@ -72,6 +84,7 @@ def assess_ocr_eligibility(
         "retained_depth_labels": len(retained),
         "unique_depth_levels": unique_levels,
         "profile_measurement_candidates": profile_measurements,
+        "depth_mark_candidates": depth_mark_candidates,
         "depth_band_km": list(band) if band else None,
         "aspect_ratio": round(aspect_ratio, 4) if aspect_ratio else None,
     }
@@ -185,13 +198,15 @@ def run_pipeline(
     image_path: Path,
     output_dir: Path,
     *,
-    ocr_api_url: str = "http://127.0.0.1:18080",
+    ocr_api_url: str = DEFAULT_SETTINGS.ocr_api_url,
     interval: float | None = None,
+    fallback_interval: float | None = None,
     trace_scale: float = 0.6,
     ocr_timeout: float = 120.0,
     ocr_client: Callable[[Path, str, float], dict] = request_ocr,
     inventory_id: str | None = None,
     survey_shape_path: Path | None = None,
+    try_raster_georeference: bool = False,
 ) -> dict:
     image_path = image_path.resolve()
     source_stat = image_path.stat()
@@ -238,13 +253,93 @@ def run_pipeline(
         )
         ocr_path.write_text(json.dumps(ocr_payload, ensure_ascii=False), encoding="utf-8")
     result["artifacts"]["ocr"] = str(ocr_path)
+
+    def raster_georeference(trace_dir: Path) -> dict | None:
+        if survey_shape_path is None or not survey_shape_path.exists():
+            return None
+        try:
+            georef = execute(
+                "georeference",
+                lambda: run_georeference(
+                    trace_dir,
+                    ocr_path,
+                    survey_shape_path,
+                    output_dir / "georef",
+                    raster_products=[image_path],
+                ),
+            )
+            result["stages"]["georeference"]["metrics"] = georef
+            result["artifacts"].update(
+                {f"georef_{name}": path for name, path in georef["files"].items()}
+            )
+            return georef
+        except ValueError as error:
+            alignment_path = trace_dir / "survey_profile_alignment.json"
+            alignment = {}
+            if alignment_path.exists():
+                alignment = json.loads(alignment_path.read_text(encoding="utf-8"))
+            result["stages"]["georeference"] = {
+                "status": "not_applicable",
+                "reason": str(error),
+                "validation": {
+                    "status": "rejected",
+                    "required_independent_crossings": 4,
+                    "similarity_fit_not_published": alignment.get("status")
+                    == "applied",
+                    "matched_line_anchors": alignment.get("matched_anchors"),
+                    "transverse_rms_m": alignment.get("rms_m"),
+                },
+                "latency_s": result["stages"]
+                .get("georeference", {})
+                .get("latency_s", 0.0),
+            }
+            result.pop("failed_stage", None)
+            result.pop("error", None)
+            result["status"] = "running"
+            return None
+
     with Image.open(image_path) as source_image:
         image_size = source_image.size
     eligibility = assess_ocr_eligibility(ocr_payload, image_size)
     result["eligibility"] = eligibility
     if not eligibility["eligible"]:
-        result["status"] = "not_applicable"
-        result["quality"] = {"status": "not_applicable", "reasons": eligibility["reasons"]}
+        georef = None
+        if try_raster_georeference:
+            trace_dir = output_dir / "trace"
+            try:
+                summary_path = execute(
+                    "trace",
+                    lambda: trace(
+                        image_path,
+                        None,
+                        trace_dir,
+                        trace_scale,
+                        ocr_path,
+                        inventory_id=inventory_id,
+                        survey_shape_path=survey_shape_path,
+                    ),
+                )
+                result["stages"]["trace"]["metrics"] = json.loads(
+                    summary_path.read_text(encoding="utf-8")
+                )
+                georef = raster_georeference(trace_dir)
+            except Exception as error:
+                result["stages"]["georeference"] = {
+                    "status": "not_applicable",
+                    "reason": f"{type(error).__name__}: {str(error)[:200]}",
+                    "latency_s": 0.0,
+                }
+                result.pop("failed_stage", None)
+                result.pop("error", None)
+        result["status"] = "review" if georef else "not_applicable"
+        result["quality"] = {
+            "status": result["status"],
+            "reasons": (
+                ["georeference_only", *eligibility["reasons"]]
+                if georef
+                else eligibility["reasons"]
+            ),
+        }
         result["total_latency_s"] = round(
             sum(float(stage["latency_s"]) for stage in result["stages"].values()), 3
         )
@@ -282,30 +377,59 @@ def run_pipeline(
     except ValueError as error:
         if not insufficient_assignment_support(error):
             raise
-        result.pop("failed_stage", None)
-        result.pop("error", None)
-        result["stages"]["assignment"]["status"] = "not_applicable"
-        result["status"] = "not_applicable"
-        result["quality"] = {
-            "status": "not_applicable",
-            "reasons": ["insufficient_contour_interval_support"],
-        }
-        result["total_latency_s"] = round(
-            sum(float(stage["latency_s"]) for stage in result["stages"].values()), 3
-        )
-        result_path.write_text(
-            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        return result
+        if fallback_interval is not None:
+            # The drafting interval is a property of the report, not the
+            # sheet; when this sheet's labels cannot support inference, reuse
+            # the interval established by sibling sheets.
+            result.pop("failed_stage", None)
+            result.pop("error", None)
+            assignment = execute(
+                "assignment",
+                lambda: assign_values(
+                    trace_dir / "isolines.json",
+                    ocr_path,
+                    image_path,
+                    assignment_dir,
+                    interval=fallback_interval,
+                ),
+            )
+            assignment["contour_interval_source"] = "report_fallback"
+        else:
+            result.pop("failed_stage", None)
+            result.pop("error", None)
+            result["stages"]["assignment"]["status"] = "not_applicable"
+            georef = raster_georeference(trace_dir) if try_raster_georeference else None
+            result["status"] = "review" if georef else "not_applicable"
+            result["quality"] = {
+                "status": result["status"],
+                "reasons": (
+                    ["georeference_only", "insufficient_contour_interval_support"]
+                    if georef
+                    else ["insufficient_contour_interval_support"]
+                ),
+            }
+            result["total_latency_s"] = round(
+                sum(float(stage["latency_s"]) for stage in result["stages"].values()), 3
+            )
+            result_path.write_text(
+                json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            return result
     result["stages"]["assignment"]["metrics"] = assignment
     if (
         int(assignment.get("confident_polylines", 0)) == 0
         and int(assignment.get("profile_measurements", 0)) < 20
+        and int(eligibility.get("depth_mark_candidates", 0)) < 40
     ):
-        result["status"] = "not_applicable"
+        georef = raster_georeference(trace_dir) if try_raster_georeference else None
+        result["status"] = "review" if georef else "not_applicable"
         result["quality"] = {
-            "status": "not_applicable",
-            "reasons": ["no_direct_contour_support"],
+            "status": result["status"],
+            "reasons": (
+                ["georeference_only", "no_direct_contour_support"]
+                if georef
+                else ["no_direct_contour_support"]
+            ),
         }
         result["total_latency_s"] = round(
             sum(float(stage["latency_s"]) for stage in result["stages"].values()), 3
@@ -331,10 +455,15 @@ def run_pipeline(
         result.pop("failed_stage", None)
         result.pop("error", None)
         result["stages"]["reconstruction"]["status"] = "not_applicable"
-        result["status"] = "not_applicable"
+        georef = raster_georeference(trace_dir) if try_raster_georeference else None
+        result["status"] = "review" if georef else "not_applicable"
         result["quality"] = {
-            "status": "not_applicable",
-            "reasons": ["insufficient_traced_contour_support"],
+            "status": result["status"],
+            "reasons": (
+                ["georeference_only", "insufficient_traced_contour_support"]
+                if georef
+                else ["insufficient_traced_contour_support"]
+            ),
         }
         result["total_latency_s"] = round(
             sum(float(stage["latency_s"]) for stage in result["stages"].values()), 3
@@ -342,9 +471,45 @@ def run_pipeline(
         result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         return result
     result["stages"]["reconstruction"]["metrics"] = reconstruction
+    if survey_shape_path is not None and survey_shape_path.exists():
+        try:
+            georef = execute(
+                "georeference",
+                lambda: run_georeference(
+                    trace_dir,
+                    ocr_path,
+                    survey_shape_path,
+                    reconstruction_dir / "georef",
+                    products=[
+                        Path(reconstruction["files"]["dissolved_isolines"]),
+                        Path(reconstruction["files"]["final_contours"]),
+                    ],
+                    point_csv_products=[
+                        Path(reconstruction["files"]["profile_points"])
+                    ],
+                    raster_products=[image_path],
+                ),
+            )
+            result["stages"]["georeference"]["metrics"] = georef
+            result["artifacts"].update(
+                {f"georef_{name}": path for name, path in georef["files"].items()}
+            )
+        except ValueError as error:
+            # Too few numbered profile matches is an honest, expected outcome;
+            # the pixel products remain fully usable without coordinates.
+            result["stages"]["georeference"] = {
+                "status": "not_applicable",
+                "reason": str(error),
+                "latency_s": result["stages"]
+                .get("georeference", {})
+                .get("latency_s", 0.0),
+            }
+            result.pop("failed_stage", None)
+            result.pop("error", None)
+            result["status"] = "running"
     local_exports = materialize_local_exports(
         reconstruction["files"]["grid"],
-        reconstruction["files"]["final_contours"],
+        reconstruction["files"]["digitized_contours"],
         reconstruction_dir,
         source_mask_path=trace_metrics["isoline_mask"],
     )
@@ -375,9 +540,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Digitize one structural-map scan")
     parser.add_argument("image", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--ocr-api-url", default="http://127.0.0.1:18080")
+    parser.add_argument("--ocr-api-url", default=DEFAULT_SETTINGS.ocr_api_url)
     parser.add_argument("--ocr-timeout", type=float, default=120.0)
     parser.add_argument("--interval", type=float)
+    parser.add_argument("--fallback-interval", type=float)
     parser.add_argument("--trace-scale", type=float, default=0.6)
     parser.add_argument("--inventory-id")
     parser.add_argument("--survey-shape", type=Path)
@@ -387,6 +553,7 @@ def main() -> None:
         args.output_dir,
         ocr_api_url=args.ocr_api_url,
         interval=args.interval,
+        fallback_interval=args.fallback_interval,
         trace_scale=args.trace_scale,
         inventory_id=args.inventory_id,
         survey_shape_path=args.survey_shape,

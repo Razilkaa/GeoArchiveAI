@@ -17,6 +17,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
+# Contour labels are required to carry their minus sign. Reading unsigned
+# single-decimal numbers as contour labels was measured and rejected: on sheet
+# 21 those readings are 71 px tall against 115 px for real contour labels and
+# 86 px for the depth marks along profiles, so they are misread small numbers,
+# not labels with a lost sign. Admitting them cost 5 m of grid RMSE.
 LABEL_PATTERN = re.compile(r"^-[0-9]+(?:\.[0-9]{1,3})?$")
 INTERVAL_CANDIDATES_KM = (0.5, 0.25, 0.2, 0.1, 0.05, 0.025, 0.02, 0.01)
 
@@ -70,16 +75,38 @@ def infer_contour_interval(readings: list[dict]) -> tuple[float, dict]:
             text = text.replace("в€’", "-").replace("вЂ“", "-")
             if not LABEL_PATTERN.match(text):
                 continue
-            value = float(text)
-            values.append(value / 1000.0 if abs(value) >= 100.0 else value)
-    unique = np.unique(np.round(values, 3))
+            values.append(float(text))
+    if len(values) < 3:
+        raise ValueError("Cannot infer contour interval from fewer than three labels")
+
+    # A sheet contours in one unit, not two: Yakutia writes kilometres, the
+    # Volga-Ural sheets metres. Readings that disagree with the sheet's own
+    # unit are misreads, and leaving them in stretches the value range far
+    # enough to hide the drafting step.
+    magnitudes = np.abs(np.asarray(values, dtype=float))
+    in_metres = float(np.median(magnitudes)) >= 100.0
+    selected_values = np.asarray(
+        [value / 1000.0 for value in values if abs(value) >= 100.0]
+        if in_metres
+        else [value for value in values if abs(value) < 100.0],
+        dtype=float,
+    )
+    if len(selected_values) >= 3:
+        low, high = np.percentile(selected_values, [10, 90])
+        pad = max((high - low) * 0.6, 1e-6)
+        trimmed = selected_values[
+            (selected_values >= low - pad) & (selected_values <= high + pad)
+        ]
+        if len(trimmed) >= 3:
+            selected_values = trimmed
+    unique = np.unique(np.round(selected_values, 3))
     if len(unique) < 3:
         raise ValueError("Cannot infer contour interval from fewer than three labels")
 
     scores = []
     for candidate in INTERVAL_CANDIDATES_KM:
         tolerance = min(0.012, candidate * 0.15)
-        support = max(
+        supports = [
             float(
                 np.mean(
                     np.abs(
@@ -90,32 +117,31 @@ def infer_contour_interval(readings: list[dict]) -> tuple[float, dict]:
                 )
             )
             for anchor in unique
+        ]
+        anchor = unique[int(np.argmax(supports))]
+        support = max(supports)
+        # Every divisor of the drafting step explains the labels equally well,
+        # so support alone always favours the smallest candidate. What sets the
+        # real step apart is that its levels are actually used: halve it and
+        # every second level falls empty.
+        levels = np.round((unique - anchor) / candidate)
+        occupancy = len(np.unique(levels)) / float(levels.max() - levels.min() + 1)
+        scores.append(
+            {
+                "interval_km": candidate,
+                "support": round(support, 4),
+                "occupancy": round(occupancy, 4),
+                "score": round(support * occupancy, 4),
+            }
         )
-        scores.append({"interval_km": candidate, "support": round(support, 4)})
-    minimum_support = 0.7
-    # Steps below 50 m are usually mathematical divisors of noisy OCR values,
-    # not the drafting interval of an archival regional structural map. If no
-    # standard step reaches the absolute support threshold, prefer the largest
-    # one close to the best plausible score instead of the trivial 10 m fit.
-    plausible = [item for item in scores if item["interval_km"] >= 0.05]
-    supported = [item for item in plausible if item["support"] >= minimum_support]
-    if supported:
-        selected = supported[0]["interval_km"]
-    else:
-        best_support = max(item["support"] for item in plausible)
-        selected = next(
-            item["interval_km"]
-            for item in plausible
-            if item["support"] >= best_support - 0.12
-        )
-    selected_support = next(
-        item["support"] for item in scores if item["interval_km"] == selected
-    )
+    best = max(scores, key=lambda item: item["score"])
+    selected = best["interval_km"]
     return float(selected), {
         "label_count": len(values),
         "unique_labels": len(unique),
-        "minimum_support": minimum_support,
-        "selected_support": selected_support,
+        "label_unit": "m" if in_metres else "km",
+        "selected_support": best["support"],
+        "selected_occupancy": best["occupancy"],
         "scores": scores,
     }
 

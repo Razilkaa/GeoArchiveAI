@@ -14,3 +14,10 @@ Swagger: http://127.0.0.1:8765/docs
 - `rag_service.py` выполняет retrieval только через RAGFlow и один LLM-вызов.
 
 Локального BM25 и отдельного corpus index в приложении нет.
+
+Конфигурация загружается из переменных окружения через
+`geoarchive.settings`. API предоставляет отдельные URL для всех доступных
+артефактов; UI не должен использовать поле `path` как локальный путь.
+
+В production `JOB_EXECUTION_MODE=queue`: API атомарно публикует запрос, а
+`python -m pipeline.queue_worker` обрабатывает его в отдельном контейнере.

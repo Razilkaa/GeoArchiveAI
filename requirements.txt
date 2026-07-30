@@ -1,9 +1,2 @@
-streamlit>=1.36
-pandas
-pillow
-pymupdf
-requests
-openai
-fastapi>=0.115,<1
-python-multipart>=0.0.20
-uvicorn
+-r requirements-api.txt
+-r requirements-pipeline.txt

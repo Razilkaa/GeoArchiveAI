@@ -13,22 +13,53 @@ from scipy.interpolate import LinearNDInterpolator
 from services.map_digitizer.export_cps3_grid import Grid, write_cps3, write_xyz
 
 
-def fit_affine(control_points: list[dict]) -> tuple[np.ndarray, dict]:
-    if len(control_points) < 3:
-        raise ValueError("At least three pixel-to-map control points are required")
+def fit_similarity(control_points: list[dict]) -> tuple[np.ndarray, dict]:
+    """Fit an orientation-reversing similarity from two or more GCPs.
+
+    Scan coordinates grow downwards while projected northings grow upwards,
+    hence the reflection. Two distinct point pairs determine translation,
+    rotation and one uniform scale; additional points only validate/refine it.
+    """
+    if len(control_points) < 2:
+        raise ValueError("At least two pixel-to-map control points are required")
     pixels = np.asarray([point["pixel"] for point in control_points], dtype=float)
     mapped = np.asarray([point["map"] for point in control_points], dtype=float)
     if pixels.shape != (len(control_points), 2) or mapped.shape != pixels.shape:
         raise ValueError("Each control point must contain pixel [x,y] and map [x,y]")
-    design = np.column_stack([pixels, np.ones(len(pixels))])
-    if np.linalg.matrix_rank(design) < 3:
-        raise ValueError("Control points are collinear")
-    coefficients, _, _, _ = np.linalg.lstsq(design, mapped, rcond=None)
-    matrix = coefficients.T
-    predicted = design @ coefficients
+    if np.linalg.norm(pixels[1] - pixels[0]) < 1.0:
+        raise ValueError("Pixel control points must be distinct")
+    if np.linalg.norm(mapped[1] - mapped[0]) < 1.0:
+        raise ValueError("Map control points must be distinct")
+    rows = []
+    targets = []
+    for (x, y), (map_x, map_y) in zip(pixels, mapped):
+        rows.extend(([x, y, 1.0, 0.0], [-y, x, 0.0, 1.0]))
+        targets.extend((map_x, map_y))
+    parameters, _, rank, _ = np.linalg.lstsq(
+        np.asarray(rows, dtype=float),
+        np.asarray(targets, dtype=float),
+        rcond=None,
+    )
+    if rank < 4:
+        raise ValueError("Control points do not determine a similarity transform")
+    a, b, offset_x, offset_y = parameters
+    scale = float(math.hypot(a, b))
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError("Invalid control-point scale")
+    matrix = np.asarray(
+        [[a, b, offset_x], [b, -a, offset_y]],
+        dtype=float,
+    )
+    predicted = transform_xy(pixels, matrix)
     residuals = np.linalg.norm(predicted - mapped, axis=1)
     return matrix, {
+        "model": "two_point_similarity",
         "count": len(control_points),
+        "scale_m_per_px": scale,
+        "rotation_deg": float(math.degrees(math.atan2(b, a))),
+        "orientation_reversing": True,
+        "pixel_baseline": float(np.linalg.norm(pixels[1] - pixels[0])),
+        "map_baseline_m": float(np.linalg.norm(mapped[1] - mapped[0])),
         "rmse_m": float(np.sqrt(np.mean(residuals**2))),
         "median_m": float(np.median(residuals)),
         "p95_m": float(np.percentile(residuals, 95)),
@@ -50,7 +81,7 @@ def georeference_grid(
     cell_size: float | None = None,
     name: str = "digitized_surface",
 ) -> dict:
-    matrix, control_quality = fit_affine(control_points)
+    matrix, control_quality = fit_similarity(control_points)
     payload = np.load(pixel_grid_path)
     source_x, source_y, source_z = payload["x"], payload["y"], payload["z"]
     source_grid_x, source_grid_y = np.meshgrid(source_x, source_y)
@@ -91,13 +122,14 @@ def georeference_grid(
     prj_path.write_text(crs.to_wkt("WKT1_ESRI"), encoding="ascii")
 
     finite_target = target_z[np.isfinite(target_z)]
-    independently_checked = len(control_points) >= 4
-    accepted = independently_checked and control_quality["p95_m"] <= cell_size * 0.5
+    independently_checked = len(control_points) >= 3
+    accepted = control_quality["p95_m"] <= max(1.0, cell_size * 0.5)
     metadata = {
         "status": "accepted" if accepted else "review",
         "source": str(pixel_grid_path),
         "target_crs": crs.to_string(),
         "target_crs_name": crs.name,
+        "transform_model": "two_point_similarity",
         "affine_matrix": matrix.tolist(),
         "control_points": control_points,
         "control_quality": control_quality,

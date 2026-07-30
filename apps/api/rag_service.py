@@ -12,6 +12,8 @@ from typing import Any
 import requests
 from openai import OpenAI
 
+from app.config import settings
+
 
 SOURCE_PAGE_RE = re.compile(
     r"\[SOURCE_PAGE:\s*(?:page_(?P<legacy>\d{5})\.[^\]]+|page:(?P<current>\d{5})(?:;[^\]]*)?)\]"
@@ -128,21 +130,22 @@ class RagflowClient:
         token: str,
         dataset_id: str,
         document_ids: list[str] | None = None,
-        base_url: str = "https://ragflow-dev.finam.ru/api/v1",
-        proxy_url: str | None = "socks5h://127.0.0.1:7777",
+        base_url: str | None = None,
+        proxy_url: str | None = None,
         session: requests.Session | None = None,
     ) -> None:
         self.token = token
         self.dataset_id = dataset_id
         self.document_ids = document_ids or []
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (base_url or settings.ragflow_url).rstrip("/")
         self.proxy_url = proxy_url
         self.session = session or requests.Session()
         if session is None:
             self.session.trust_env = False
 
-    def retrieve(self, question: str, limit: int = 5) -> dict[str, Any]:
+    def retrieve(self, question: str, limit: int | None = None) -> dict[str, Any]:
         started = time.perf_counter()
+        limit = limit or settings.ragflow_page_size
         proxies = None
         if self.proxy_url:
             proxies = {"http": self.proxy_url, "https": self.proxy_url}
@@ -154,27 +157,46 @@ class RagflowClient:
                 "question": question,
                 "page": 1,
                 "page_size": limit,
-                "similarity_threshold": 0.1,
-                "vector_similarity_weight": 0.3,
-                "top_k": 64,
-                "keyword": True,
+                "similarity_threshold": settings.ragflow_similarity_threshold,
+                "vector_similarity_weight": settings.ragflow_vector_similarity_weight,
+                "top_k": settings.ragflow_top_k,
+                # RAGFlow 0.20 treats the boolean keyword flag as an expensive
+                # keyword-generation request. On the local deployment it
+                # stalls for minutes; hybrid retrieval itself does not require
+                # this optional flag.
+                "keyword": False,
             },
-            "verify": False,
-            "timeout": float(os.environ.get("RAGFLOW_RETRIEVAL_TIMEOUT_S", "60")),
+            "verify": settings.ragflow_verify_tls,
+            "timeout": settings.ragflow_retrieval_timeout_s,
         }
         transport = "proxy" if proxies else "direct"
-        try:
-            response = self.session.post(
-                f"{self.base_url}/retrieval", proxies=proxies, **request_kwargs
-            )
-        except requests.ConnectionError:
-            if not proxies:
-                raise
-            transport = "direct_fallback"
-            response = self.session.post(
-                f"{self.base_url}/retrieval", proxies=None, **request_kwargs
-            )
-        response.raise_for_status()
+        active_proxies = proxies
+        response: requests.Response | None = None
+        for attempt in range(settings.ragflow_retrieval_attempts):
+            try:
+                response = self.session.post(
+                    f"{self.base_url}/retrieval",
+                    proxies=active_proxies,
+                    **request_kwargs,
+                )
+                response.raise_for_status()
+                break
+            except requests.ConnectionError:
+                if active_proxies:
+                    active_proxies = None
+                    transport = "direct_fallback"
+                elif attempt + 1 >= settings.ragflow_retrieval_attempts:
+                    raise
+            except requests.Timeout:
+                if attempt + 1 >= settings.ragflow_retrieval_attempts:
+                    raise
+            except requests.HTTPError as error:
+                status = error.response.status_code if error.response is not None else None
+                if status not in {429, 502, 503, 504} or attempt + 1 >= settings.ragflow_retrieval_attempts:
+                    raise
+            time.sleep(settings.ragflow_retry_backoff_s * (attempt + 1))
+        if response is None:
+            raise RuntimeError("RAGFlow retrieval did not return a response")
         payload = response.json()
         if payload.get("code") != 0:
             raise RuntimeError(f"RAGFlow error: {payload.get('message') or payload.get('code')}")
@@ -228,17 +250,16 @@ class ReportAnswerService:
         document_ids = list(metadata.get("document_ids") or [])
         if not document_ids and metadata.get("document_id"):
             document_ids = [str(metadata["document_id"])]
-        proxy = os.environ.get("RAGFLOW_PROXY", "socks5h://127.0.0.1:7777")
-        if proxy.lower() in {"", "none", "off"}:
-            proxy = None
+        proxy = settings.proxy_url
         self.ragflow = ragflow or RagflowClient(
             token=read_token(config.ragflow_token_path),
             dataset_id=dataset_id,
             document_ids=document_ids,
+            base_url=settings.ragflow_url,
             proxy_url=proxy,
         )
         credentials = read_key_values(config.llm_credentials_path)
-        self.model = os.environ.get("DEMO_LLM_MODEL", "openai/gpt-4o-mini")
+        self.model = settings.llm_model
         self.llm = llm or OpenAI(
             api_key=credentials["OPENAI_API_KEY"],
             base_url=credentials.get("BASE_URL"),

@@ -9,19 +9,18 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
 import requests
-import urllib3
 import fitz
 from openai import OpenAI
 from PIL import Image
 
 
-urllib3.disable_warnings()
 
 NUMERIC_CONFUSABLE_RE = re.compile(
     r"(?=[0-9ІIОоOoТт.,:/-]*\d)[0-9ІIОоOoТт]+(?:[.,:/-][0-9ІIОоOoТт]+)*"
@@ -289,6 +288,45 @@ def run_vision_ocr(
     return output_dir
 
 
+_PIL_IMAGE_OPEN_LOCK = threading.Lock()
+_LARGE_IMAGE_RESIZE_LOCK = threading.Lock()
+OCR_API_MAX_PIXELS = 50_000_000
+
+
+def _api_image_payload(
+    path: Path,
+    *,
+    max_pixels: int = OCR_API_MAX_PIXELS,
+) -> tuple[str, bytes | None]:
+    with _PIL_IMAGE_OPEN_LOCK:
+        previous_limit = Image.MAX_IMAGE_PIXELS
+        Image.MAX_IMAGE_PIXELS = None
+        try:
+            with Image.open(path) as image:
+                width, height = image.size
+        finally:
+            Image.MAX_IMAGE_PIXELS = previous_limit
+    if width * height <= max_pixels:
+        return path.name, None
+
+    scale = (max_pixels / float(width * height)) ** 0.5
+    target = (max(1, round(width * scale)), max(1, round(height * scale)))
+    with _LARGE_IMAGE_RESIZE_LOCK:
+        with _PIL_IMAGE_OPEN_LOCK:
+            previous_limit = Image.MAX_IMAGE_PIXELS
+            Image.MAX_IMAGE_PIXELS = None
+            try:
+                image = Image.open(path)
+            finally:
+                Image.MAX_IMAGE_PIXELS = previous_limit
+        with image:
+            image = image.convert("RGB")
+            image.thumbnail(target, Image.Resampling.LANCZOS)
+            buffer = io.BytesIO()
+            image.save(buffer, format="JPEG", quality=92, optimize=True)
+    return f"{path.stem}_ocr.jpg", buffer.getvalue()
+
+
 def _run_api_page(
     path: Path,
     output_path: Path,
@@ -298,10 +336,12 @@ def _run_api_page(
     started = time.perf_counter()
     session = requests.Session()
     session.trust_env = False
-    with path.open("rb") as handle:
+    upload_name, payload = _api_image_payload(path)
+    upload_handle = path.open("rb") if payload is None else io.BytesIO(payload)
+    with upload_handle as handle:
         response = session.post(
             f"{api_url.rstrip('/')}/v1/ocr",
-            files={"file": (path.name, handle, "image/jpeg")},
+            files={"file": (upload_name, handle, "image/jpeg")},
             timeout=timeout_s,
         )
     response.raise_for_status()
@@ -479,6 +519,9 @@ class RagflowIngestor:
         self.session = requests.Session()
         self.session.trust_env = False
         self.session.headers.update({"Authorization": f"Bearer {token}"})
+        self.verify_tls = os.environ.get("RAGFLOW_VERIFY_TLS", "true").casefold() in {
+            "1", "true", "yes", "on"
+        }
         if proxy:
             self.session.proxies.update({"http": proxy, "https": proxy})
 
@@ -488,7 +531,7 @@ class RagflowIngestor:
         listing = self.session.get(
             f"{self.base_url}/datasets/{dataset_id}/documents",
             params={"page": 1, "page_size": 100, "keywords": remote_name},
-            verify=False,
+            verify=self.verify_tls,
             timeout=30,
         )
         listing.raise_for_status()
@@ -502,7 +545,7 @@ class RagflowIngestor:
                 response = self.session.post(
                     f"{self.base_url}/datasets/{dataset_id}/documents",
                     files={"file": (remote_name, handle, "text/markdown")},
-                    verify=False,
+                    verify=self.verify_tls,
                     timeout=60,
                 )
             response.raise_for_status()
@@ -511,7 +554,7 @@ class RagflowIngestor:
         parse = self.session.post(
             f"{self.base_url}/datasets/{dataset_id}/chunks",
             json={"document_ids": [document_id]},
-            verify=False,
+            verify=self.verify_tls,
             timeout=60,
         )
         parse.raise_for_status()
@@ -521,7 +564,7 @@ class RagflowIngestor:
             response = self.session.get(
                 f"{self.base_url}/datasets/{dataset_id}/documents",
                 params={"page": 1, "page_size": 100, "keywords": remote_name},
-                verify=False,
+                verify=self.verify_tls,
                 timeout=30,
             )
             response.raise_for_status()
@@ -552,12 +595,12 @@ class RagflowIngestor:
                 "question": question,
                 "page": 1,
                 "page_size": limit,
-                "similarity_threshold": 0.05,
-                "vector_similarity_weight": 0.3,
-                "top_k": 64,
-                "keyword": True,
+                "similarity_threshold": float(os.environ.get("RAGFLOW_INGEST_SIMILARITY_THRESHOLD", "0.05")),
+                "vector_similarity_weight": float(os.environ.get("RAGFLOW_VECTOR_SIMILARITY_WEIGHT", "0.3")),
+                "top_k": int(os.environ.get("RAGFLOW_TOP_K", "64")),
+                "keyword": False,
             },
-            verify=False,
+            verify=self.verify_tls,
             timeout=60,
         )
         response.raise_for_status()
@@ -621,8 +664,8 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--dataset-id")
     parser.add_argument("--token-file", type=Path)
-    parser.add_argument("--base-url", default="https://ragflow-dev.finam.ru/api/v1")
-    parser.add_argument("--proxy", default="socks5h://127.0.0.1:7777")
+    parser.add_argument("--base-url", default=os.environ.get("RAGFLOW_URL"))
+    parser.add_argument("--proxy", default=os.environ.get("RAGFLOW_PROXY"))
     args = parser.parse_args()
 
     if args.stage == "prepare":

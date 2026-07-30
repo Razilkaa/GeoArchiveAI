@@ -25,3 +25,6 @@ research/map_digitization/artifacts/
 research/map_digitization/tracing/out/
 shapes/
 work/
+apps/web/node_modules/
+apps/web/dist/
+apps/web/*.tsbuildinfo

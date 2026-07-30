@@ -1,0 +1,1343 @@
+{
+  "schema_version": 1,
+  "description": "GeoArchiveAI expert-review RAG regression set",
+  "items": [
+    {
+      "id": "1174:structures:0001",
+      "report_id": "1174",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Кедапчинская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00053"
+      ],
+      "required_terms": [
+        "Кедапчинская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "1174:structures:0002",
+      "report_id": "1174",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Дьяпальская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00064",
+        "page:00065"
+      ],
+      "required_terms": [
+        "Дьяпальская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "1174:structures:0003",
+      "report_id": "1174",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Чебыдинская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00056"
+      ],
+      "required_terms": [
+        "Чебыдинская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "1174:structures:0004",
+      "report_id": "1174",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Андреевская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00058"
+      ],
+      "required_terms": [
+        "Андреевская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "1174:structures:0005",
+      "report_id": "1174",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Запално-Тонгская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00061"
+      ],
+      "required_terms": [
+        "Запално-Тонгская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "1174:wells:0006",
+      "report_id": "1174",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «Чебыдинокан»?",
+      "expected_pages": [
+        "page:00059"
+      ],
+      "required_terms": [
+        "Чебыдинокан"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "1174:wells:0007",
+      "report_id": "1174",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «Сыгдахская»?",
+      "expected_pages": [
+        "page:00052"
+      ],
+      "required_terms": [
+        "Сыгдахская"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "363934:structures:0008",
+      "report_id": "363934",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Хушманская брахиантиклиналь»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00018"
+      ],
+      "required_terms": [
+        "Хушманская брахиантиклиналь"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "363934:structures:0009",
+      "report_id": "363934",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Юктоконское структурное осложнение»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00018"
+      ],
+      "required_terms": [
+        "Юктоконское структурное осложнение"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "363934:wells:0010",
+      "report_id": "363934",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «823»?",
+      "expected_pages": [
+        "page:00103"
+      ],
+      "required_terms": [
+        "823"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "363934:wells:0011",
+      "report_id": "363934",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «824»?",
+      "expected_pages": [
+        "page:00103"
+      ],
+      "required_terms": [
+        "824"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "363934:wells:0012",
+      "report_id": "363934",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «825»?",
+      "expected_pages": [
+        "page:00103"
+      ],
+      "required_terms": [
+        "825"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "363934:wells:0013",
+      "report_id": "363934",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «826»?",
+      "expected_pages": [
+        "page:00103"
+      ],
+      "required_terms": [
+        "826"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "363934:wells:0014",
+      "report_id": "363934",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «827»?",
+      "expected_pages": [
+        "page:00103"
+      ],
+      "required_terms": [
+        "827"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "363934:wells:0015",
+      "report_id": "363934",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «828»?",
+      "expected_pages": [
+        "page:00103"
+      ],
+      "required_terms": [
+        "828"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "365610:structures:0016",
+      "report_id": "365610",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Усть-Кутское сводовое поднятие»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00015",
+        "page:00141",
+        "page:00119",
+        "page:00245",
+        "page:00249",
+        "page:00123"
+      ],
+      "required_terms": [
+        "Усть-Кутское сводовое поднятие"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "365610:structures:0017",
+      "report_id": "365610",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Нийское структурное осложнение»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00015",
+        "page:00141",
+        "page:00119",
+        "page:00245",
+        "page:00249",
+        "page:00123"
+      ],
+      "required_terms": [
+        "Нийское структурное осложнение"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "365610:structures:0018",
+      "report_id": "365610",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Прибайкальский прогиб»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00249",
+        "page:00123"
+      ],
+      "required_terms": [
+        "Прибайкальский прогиб"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "365610:wells:0019",
+      "report_id": "365610",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «4-Казаршинская»?",
+      "expected_pages": [
+        "page:00119",
+        "page:00245"
+      ],
+      "required_terms": [
+        "4-Казаршинская"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "365610:wells:0020",
+      "report_id": "365610",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «I-Казаркинская»?",
+      "expected_pages": [
+        "page:00119",
+        "page:00245"
+      ],
+      "required_terms": [
+        "I-Казаркинская"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "368268:structures:0021",
+      "report_id": "368268",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Космическая структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00085",
+        "page:00002",
+        "page:00081",
+        "page:00079"
+      ],
+      "required_terms": [
+        "Космическая структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "368268:wells:0022",
+      "report_id": "368268",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «1»?",
+      "expected_pages": [
+        "page:00070"
+      ],
+      "required_terms": [
+        "1"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "368268:wells:0023",
+      "report_id": "368268",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «1»?",
+      "expected_pages": [
+        "page:00085"
+      ],
+      "required_terms": [
+        "1"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "368333:structures:0024",
+      "report_id": "368333",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Атовско-Шамановское поднятие»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00097",
+        "page:00096"
+      ],
+      "required_terms": [
+        "Атовско-Шамановское поднятие"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "368333:structures:0025",
+      "report_id": "368333",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Балаганкинское поднятие»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00002",
+        "page:00095"
+      ],
+      "required_terms": [
+        "Балаганкинское поднятие"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "368333:wells:0026",
+      "report_id": "368333",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «3»?",
+      "expected_pages": [
+        "page:00098"
+      ],
+      "required_terms": [
+        "3"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "368333:wells:0027",
+      "report_id": "368333",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «I8»?",
+      "expected_pages": [
+        "page:00097"
+      ],
+      "required_terms": [
+        "I8"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "368333:wells:0028",
+      "report_id": "368333",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «163»?",
+      "expected_pages": [
+        "page:00097"
+      ],
+      "required_terms": [
+        "163"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "370141:structures:0029",
+      "report_id": "370141",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Западная структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00002",
+        "page:00100",
+        "page:00105"
+      ],
+      "required_terms": [
+        "Западная структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "370141:structures:0030",
+      "report_id": "370141",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Озёрная структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00002",
+        "page:00100",
+        "page:00105"
+      ],
+      "required_terms": [
+        "Озёрная структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "370141:structures:0031",
+      "report_id": "370141",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Тымпучиканская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00002",
+        "page:00105"
+      ],
+      "required_terms": [
+        "Тымпучиканская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "370141:structures:0032",
+      "report_id": "370141",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Отутская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00002",
+        "page:00105"
+      ],
+      "required_terms": [
+        "Отутская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "370141:structures:0033",
+      "report_id": "370141",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Налимья структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00002",
+        "page:00105"
+      ],
+      "required_terms": [
+        "Налимья структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "370141:structures:0034",
+      "report_id": "370141",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Хамакинская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00002",
+        "page:00105"
+      ],
+      "required_terms": [
+        "Хамакинская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "370141:wells:0035",
+      "report_id": "370141",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «Чаяндинская»?",
+      "expected_pages": [
+        "page:00100",
+        "page:00098",
+        "page:00002"
+      ],
+      "required_terms": [
+        "Чаяндинская"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "370141:wells:0036",
+      "report_id": "370141",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «Западная»?",
+      "expected_pages": [
+        "page:00105",
+        "page:00002"
+      ],
+      "required_terms": [
+        "Западная"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "370141:wells:0037",
+      "report_id": "370141",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «Озерная»?",
+      "expected_pages": [
+        "page:00105",
+        "page:00002"
+      ],
+      "required_terms": [
+        "Озерная"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "370141:wells:0038",
+      "report_id": "370141",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «Тымпучиканская»?",
+      "expected_pages": [
+        "page:00105",
+        "page:00002"
+      ],
+      "required_terms": [
+        "Тымпучиканская"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "370141:wells:0039",
+      "report_id": "370141",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «Налимья»?",
+      "expected_pages": [
+        "page:00105",
+        "page:00002"
+      ],
+      "required_terms": [
+        "Налимья"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "370141:wells:0040",
+      "report_id": "370141",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «Отутская»?",
+      "expected_pages": [
+        "page:00105",
+        "page:00002"
+      ],
+      "required_terms": [
+        "Отутская"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "370141:wells:0041",
+      "report_id": "370141",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «Хамакинская»?",
+      "expected_pages": [
+        "page:00105",
+        "page:00002"
+      ],
+      "required_terms": [
+        "Хамакинская"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "375392:structures:0042",
+      "report_id": "375392",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Ахинская антиклиналь»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00154",
+        "page:00003"
+      ],
+      "required_terms": [
+        "Ахинская антиклиналь"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "375392:structures:0043",
+      "report_id": "375392",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Покровская площадь»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00154"
+      ],
+      "required_terms": [
+        "Покровская площадь"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "375392:structures:0044",
+      "report_id": "375392",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «рекомендуемое бурение»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00003"
+      ],
+      "required_terms": [
+        "рекомендуемое бурение"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "375392:wells:0045",
+      "report_id": "375392",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «I41»?",
+      "expected_pages": [
+        "page:00167",
+        "page:00168"
+      ],
+      "required_terms": [
+        "I41"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "375665:wells:0046",
+      "report_id": "375665",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «107»?",
+      "expected_pages": [
+        "page:00008",
+        "page:00009"
+      ],
+      "required_terms": [
+        "107"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "375665:wells:0047",
+      "report_id": "375665",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «93»?",
+      "expected_pages": [
+        "page:00008",
+        "page:00002"
+      ],
+      "required_terms": [
+        "93"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "375665:wells:0048",
+      "report_id": "375665",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «22»?",
+      "expected_pages": [
+        "page:00008",
+        "page:00002"
+      ],
+      "required_terms": [
+        "22"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "375665:wells:0049",
+      "report_id": "375665",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «71»?",
+      "expected_pages": [
+        "page:00008",
+        "page:00002"
+      ],
+      "required_terms": [
+        "71"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "375665:wells:0050",
+      "report_id": "375665",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «3»?",
+      "expected_pages": [
+        "page:00008"
+      ],
+      "required_terms": [
+        "3"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "375665:wells:0051",
+      "report_id": "375665",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «1»?",
+      "expected_pages": [
+        "page:00009"
+      ],
+      "required_terms": [
+        "1"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "375665:wells:0052",
+      "report_id": "375665",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «4»?",
+      "expected_pages": [
+        "page:00009"
+      ],
+      "required_terms": [
+        "4"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "375665:wells:0053",
+      "report_id": "375665",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «15/30»?",
+      "expected_pages": [
+        "page:00009"
+      ],
+      "required_terms": [
+        "15/30"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "375665:wells:0054",
+      "report_id": "375665",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «28»?",
+      "expected_pages": [
+        "page:00009"
+      ],
+      "required_terms": [
+        "28"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "375665:wells:0055",
+      "report_id": "375665",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «18»?",
+      "expected_pages": [
+        "page:00009"
+      ],
+      "required_terms": [
+        "18"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "375665:wells:0056",
+      "report_id": "375665",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «66»?",
+      "expected_pages": [
+        "page:00009"
+      ],
+      "required_terms": [
+        "66"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "375665:wells:0057",
+      "report_id": "375665",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «72»?",
+      "expected_pages": [
+        "page:00009"
+      ],
+      "required_terms": [
+        "72"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "377069:structures:0058",
+      "report_id": "377069",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Мамолинский антиклинальный перегиб»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00088",
+        "page:00183"
+      ],
+      "required_terms": [
+        "Мамолинский антиклинальный перегиб"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "378947:wells:0059",
+      "report_id": "378947",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «Р-645»?",
+      "expected_pages": [
+        "page:00006",
+        "page:00009",
+        "page:00007"
+      ],
+      "required_terms": [
+        "Р-645"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "378947:wells:0060",
+      "report_id": "378947",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «Р-661»?",
+      "expected_pages": [
+        "page:00007"
+      ],
+      "required_terms": [
+        "Р-661"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "379895:wells:0061",
+      "report_id": "379895",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «16/79-80»?",
+      "expected_pages": [
+        "page:00154",
+        "page:00159"
+      ],
+      "required_terms": [
+        "16/79-80"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "379895:wells:0062",
+      "report_id": "379895",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «18/78-79»?",
+      "expected_pages": [
+        "page:00159"
+      ],
+      "required_terms": [
+        "18/78-79"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "380927:wells:0063",
+      "report_id": "380927",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «10»?",
+      "expected_pages": [
+        "page:00226"
+      ],
+      "required_terms": [
+        "10"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "380927:wells:0064",
+      "report_id": "380927",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «11»?",
+      "expected_pages": [
+        "page:00226"
+      ],
+      "required_terms": [
+        "11"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "380927:wells:0065",
+      "report_id": "380927",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «7»?",
+      "expected_pages": [
+        "page:00226"
+      ],
+      "required_terms": [
+        "7"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "384092:structures:0066",
+      "report_id": "384092",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Шеинская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00003"
+      ],
+      "required_terms": [
+        "Шеинская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "384092:structures:0067",
+      "report_id": "384092",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Мейская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00003"
+      ],
+      "required_terms": [
+        "Мейская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "384092:structures:0068",
+      "report_id": "384092",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Тюдердская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00003"
+      ],
+      "required_terms": [
+        "Тюдердская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "384092:structures:0069",
+      "report_id": "384092",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Западно-Таландинская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00003"
+      ],
+      "required_terms": [
+        "Западно-Таландинская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "384092:structures:0070",
+      "report_id": "384092",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Усть-Маркинская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00003"
+      ],
+      "required_terms": [
+        "Усть-Маркинская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "384092:structures:0071",
+      "report_id": "384092",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Тюпереджеская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00164"
+      ],
+      "required_terms": [
+        "Тюпереджеская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "384092:structures:0072",
+      "report_id": "384092",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Мейнская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00164"
+      ],
+      "required_terms": [
+        "Мейнская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "384092:structures:0073",
+      "report_id": "384092",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Западно-Галандинская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00164"
+      ],
+      "required_terms": [
+        "Западно-Галандинская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "384092:wells:0074",
+      "report_id": "384092",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «Р-410»?",
+      "expected_pages": [
+        "page:00193"
+      ],
+      "required_terms": [
+        "Р-410"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "384092:wells:0075",
+      "report_id": "384092",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «401»?",
+      "expected_pages": [
+        "page:00156"
+      ],
+      "required_terms": [
+        "401"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "384425:wells:0076",
+      "report_id": "384425",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «Карамская опорная скважина»?",
+      "expected_pages": [
+        "page:00286"
+      ],
+      "required_terms": [
+        "Карамская опорная скважина"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "384425:wells:0077",
+      "report_id": "384425",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «Нотайская структура»?",
+      "expected_pages": [
+        "page:00291"
+      ],
+      "required_terms": [
+        "Нотайская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "384425:wells:0078",
+      "report_id": "384425",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «Сугджинское поднятие»?",
+      "expected_pages": [
+        "page:00286"
+      ],
+      "required_terms": [
+        "Сугджинское поднятие"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "393156:structures:0079",
+      "report_id": "393156",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Средне-Ботуобинская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00013"
+      ],
+      "required_terms": [
+        "Средне-Ботуобинская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "393156:structures:0080",
+      "report_id": "393156",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Тас-Юряхская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00013",
+        "page:00011"
+      ],
+      "required_terms": [
+        "Тас-Юряхская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "393156:structures:0081",
+      "report_id": "393156",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Харыйя-Юряхская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00011"
+      ],
+      "required_terms": [
+        "Харыйя-Юряхская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "393156:structures:0082",
+      "report_id": "393156",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Северо-Ботуобинская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00011"
+      ],
+      "required_terms": [
+        "Северо-Ботуобинская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "393156:structures:0083",
+      "report_id": "393156",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Юрегинская структура»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00017"
+      ],
+      "required_terms": [
+        "Юрегинская структура"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "393156:structures:0084",
+      "report_id": "393156",
+      "category": "structures",
+      "question": "В отчёте упоминается структура «Северо-Юрегинский структурный выступ»? Кратко опиши её статус.",
+      "expected_pages": [
+        "page:00017"
+      ],
+      "required_terms": [
+        "Северо-Юрегинский структурный выступ"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "393156:wells:0085",
+      "report_id": "393156",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «48»?",
+      "expected_pages": [
+        "page:00012",
+        "page:00016"
+      ],
+      "required_terms": [
+        "48"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    },
+    {
+      "id": "393156:wells:0086",
+      "report_id": "393156",
+      "category": "wells",
+      "question": "Что в отчёте сказано о скважине «574»?",
+      "expected_pages": [
+        "page:00016"
+      ],
+      "required_terms": [
+        "574"
+      ],
+      "forbidden_terms": [],
+      "expect_abstain": false,
+      "review_status": "candidate"
+    }
+  ]
+}

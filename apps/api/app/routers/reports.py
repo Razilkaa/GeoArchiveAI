@@ -6,13 +6,23 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 
-from app.schemas import AskRequest, IntakeResponse, RunRequest
+from app.schemas import (
+    AskRequest,
+    IntakeResponse,
+    ReportMapProfileGeoreferenceRequest,
+    RunRequest,
+)
 from app.config import settings
 from app.services.automation import reconcile_now
 from app.services.intake import save_upload
 from app.services.jobs import start_report
+from app.services.report_georeference import (
+    georeference_report_map,
+    profile_crossings,
+)
 from app.services.reports import (
     artifact_payload,
+    report_artifact,
     list_reports,
     map_payload,
     read_json,
@@ -25,6 +35,7 @@ from rag_service import ReportAnswerService, ReportConfig, load_report_configs
 
 router = APIRouter(prefix="/api", tags=["reports"])
 configs = load_report_configs()
+answer_services: dict[str, tuple[tuple[int, int], ReportAnswerService]] = {}
 
 
 def report_config(report_id: str) -> ReportConfig:
@@ -34,8 +45,8 @@ def report_config(report_id: str) -> ReportConfig:
         bundle_path=directory / "result_bundle.json",
         ragflow_metadata_path=directory / "ragflow.json",
         local_corpus_path=directory / f"report_{report_id}_fast_ocr.md",
-        ragflow_token_path=settings.project_root / "secrets" / "ragflow_token.txt",
-        llm_credentials_path=settings.project_root / "secrets" / "tokent.txt",
+        ragflow_token_path=settings.ragflow_token_path,
+        llm_credentials_path=settings.llm_credentials_path,
     )
     if all(
         path.exists()
@@ -54,7 +65,17 @@ def report_config(report_id: str) -> ReportConfig:
 
 
 def answer_service(report_id: str) -> ReportAnswerService:
-    return ReportAnswerService(report_config(report_id))
+    config = report_config(report_id)
+    signature = (
+        config.bundle_path.stat().st_mtime_ns,
+        config.ragflow_metadata_path.stat().st_mtime_ns,
+    )
+    cached = answer_services.get(report_id)
+    if cached and cached[0] == signature:
+        return cached[1]
+    service = ReportAnswerService(config)
+    answer_services[report_id] = (signature, service)
+    return service
 
 
 def global_search_service() -> ReportAnswerService:
@@ -116,9 +137,36 @@ def report_artifacts(report_id: str) -> dict[str, Any]:
     return {"report_id": report_id, "artifacts": artifact_payload(report_id)}
 
 
+@router.get("/reports/{report_id}/artifacts/{artifact_id}")
+def download_report_artifact(report_id: str, artifact_id: str) -> FileResponse:
+    path, media_type = report_artifact(report_id, artifact_id)
+    return FileResponse(path, media_type=media_type, filename=path.name)
+
+
 @router.get("/reports/{report_id}/maps")
 def report_maps(report_id: str) -> dict[str, Any]:
     return map_payload(report_id)
+
+
+@router.get("/reports/{report_id}/maps/profile-crossings")
+async def report_map_profile_crossings(
+    report_id: str,
+    page_id: str,
+) -> dict[str, Any]:
+    return await run_in_threadpool(profile_crossings, report_id, page_id)
+
+
+@router.post("/reports/{report_id}/maps/georeference")
+async def georeference_report_map_by_profiles(
+    report_id: str,
+    request: ReportMapProfileGeoreferenceRequest,
+) -> dict[str, Any]:
+    return await run_in_threadpool(
+        georeference_report_map,
+        report_id,
+        page_id=request.page_id,
+        anchors=[anchor.model_dump() for anchor in request.anchors],
+    )
 
 
 @router.get("/reports/{report_id}/maps/artifacts/{artifact_id}")

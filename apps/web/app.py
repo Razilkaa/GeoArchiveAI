@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 import zipfile
 from pathlib import Path
@@ -11,12 +12,7 @@ import pandas as pd
 import requests
 import streamlit as st
 
-from media import image_preview as load_image_preview
-
-
-PROJECT_ROOT = Path(r"C:\FINAM\Conference")
-BACKEND_URL = "http://127.0.0.1:8765"
-DEMO_REPORT_ID = "384092"
+BACKEND_URL = os.environ["GEOARCHIVE_API_URL"].rstrip("/")
 
 
 def api_session() -> requests.Session:
@@ -82,9 +78,7 @@ def discover_reports() -> dict[str, str]:
         source_name = Path(str(item.get("source_root") or report_id)).name
         status = str(item.get("worker_status") or "pending")
         reports[report_id] = f"{report_id} · {source_name} · {status}"
-    if DEMO_REPORT_ID in reports:
-        reports[DEMO_REPORT_ID] = "384092 · Хампинская площадь · 1979–1980"
-    return dict(sorted(reports.items(), key=lambda item: (item[0] != DEMO_REPORT_ID, item[0])))
+    return dict(sorted(reports.items()))
 
 
 @st.cache_data(ttl=10)
@@ -143,24 +137,15 @@ def load_processing_state(report_id: str) -> dict:
     }
 
 
-@st.cache_data
-def _cached_image_preview(
-    path: str, modified_ns: int, max_size: tuple[int, int] = (1800, 1100)
-):
-    return load_image_preview(path, max_size)
+@st.cache_data(ttl=30)
+def image_preview(url: str, max_size: tuple[int, int] = (1800, 1100)):
+    response = api_session().get(f"{BACKEND_URL}{url}", timeout=60)
+    response.raise_for_status()
+    from PIL import Image
 
-
-def resolve_artifact_path(path: str | Path) -> Path:
-    candidate = Path(path)
-    if not candidate.is_absolute():
-        candidate = PROJECT_ROOT / candidate
-    return candidate.resolve()
-
-
-def image_preview(path: str, max_size: tuple[int, int] = (1800, 1100)):
-    source = resolve_artifact_path(path)
-    modified_ns = source.stat().st_mtime_ns if source.exists() else 0
-    return _cached_image_preview(str(source), modified_ns, max_size)
+    image = Image.open(io.BytesIO(response.content)).convert("RGB")
+    image.thumbnail(max_size)
+    return image
 
 
 def clean_filename(name: str) -> str:
@@ -236,9 +221,9 @@ def render_processing_status(report_id: str) -> None:
             st.error(f"Сбой на стадии {stage_name}: {detail}")
         else:
             st.error("Обработка остановлена")
-    elif worker_status == "completed" and report_id != DEMO_REPORT_ID:
+    elif worker_status == "completed":
         st.success(f"Основная обработка завершена · {page_count or 0} стр.")
-    if report_id != DEMO_REPORT_ID and worker_status in {"blocked", "failed"}:
+    if worker_status in {"blocked", "failed"}:
         if st.button("Повторить с места сбоя", key=f"run:{report_id}", use_container_width=True):
             try:
                 run_report(report_id)
@@ -415,7 +400,7 @@ with materials_tab:
     if not page_ids:
         st.info("Карты в отчёте не обнаружены.")
     else:
-        default_page = "page:00184" if "page:00184" in page_ids else page_ids[0]
+        default_page = page_ids[0]
         selected_page = st.selectbox(
             "Лист",
             page_ids,
@@ -435,12 +420,12 @@ with materials_tab:
         source_column, result_column = st.columns(2, gap="large")
         with source_column:
             st.subheader("Исходная карта")
-            source_preview = image_preview(source["path"]) if source else None
+            source_preview = image_preview(source["download_url"]) if source else None
             if source_preview is not None:
                 st.image(source_preview, width="stretch")
         with result_column:
             st.subheader("Оцифрованная карта")
-            result_preview = image_preview(result["path"]) if result else None
+            result_preview = image_preview(result["download_url"]) if result else None
             if result_preview is not None:
                 st.image(result_preview, width="stretch")
             else:
@@ -453,12 +438,14 @@ with materials_tab:
         ]
         download_columns = st.columns(max(1, len(downloads)))
         for index, (column, artifact) in enumerate(zip(download_columns, downloads)):
-            path = resolve_artifact_path(str(artifact.get("path") or ""))
-            if path.is_file():
+            download_url = str(artifact.get("download_url") or "")
+            if download_url:
+                response = api_session().get(f"{BACKEND_URL}{download_url}", timeout=60)
+                response.raise_for_status()
                 column.download_button(
                     "Скачать GeoJSON" if artifact.get("name") == "interpolated_contours" else "Скачать CPS-3",
-                    data=path.read_bytes(),
-                    file_name=path.name,
+                    data=response.content,
+                    file_name=Path(str(artifact.get("path") or "artifact")).name,
                     mime=str(artifact.get("media_type") or "application/octet-stream"),
                     key=f"map-download:{report_id}:{selected_page}:{index}",
                     use_container_width=True,

@@ -1,0 +1,15 @@
+.git
+.env
+secrets
+runs
+results
+reports_inbox
+reports_staging
+384092
+work
+shapes
+apps/web/node_modules
+apps/web/dist
+**/__pycache__
+*.pyc
+*.log

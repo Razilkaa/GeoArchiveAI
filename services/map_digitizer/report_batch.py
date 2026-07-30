@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import mimetypes
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable
 
@@ -11,11 +13,14 @@ import fitz
 import numpy as np
 from PIL import Image
 
+from geoarchive.settings import load_settings
 from services.map_digitizer import PIPELINE_VERSION
 from services.map_digitizer.pipeline import file_sha256, run_pipeline
+from services.map_digitizer.survey_profiles import find_survey_shape
 
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
+DEFAULT_SETTINGS = load_settings()
 CANDIDATE_CONTENT_TYPES = {"map", "chart"}
 IMAGE_MEDIA_TYPES = {
     ".jpg": "image/jpeg",
@@ -35,6 +40,11 @@ def reusable_result(path: Path, source: Path) -> dict | None:
     if payload.get("status") not in {"accepted", "review", "not_applicable"}:
         return None
     if payload.get("version") != PIPELINE_VERSION:
+        return None
+    georeference = (payload.get("stages") or {}).get("georeference") or {}
+    if georeference.get("method") == "survey_profile_similarity":
+        # Older builds published a transverse line fit even when independent
+        # profile crossings could not constrain along-line translation.
         return None
     if Path(payload.get("source", "")).resolve() != source.resolve():
         return None
@@ -127,12 +137,16 @@ def run_report_maps(
     ocr_api_url: str,
     *,
     pipeline_runner: Callable[..., dict] = run_pipeline,
+    workers: int = 4,
 ) -> dict:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     run_dir = manifest_path.parent
     source_root = Path(str(manifest.get("source_root") or ""))
     inventory_id = str(manifest.get("report_id") or source_root.name)
-    survey_shape_path = Path(__file__).resolve().parents[2] / "shapes" / "srr_all.shp"
+    survey_shape_path = find_survey_shape(
+        inventory_id,
+        Path(__file__).resolve().parents[2] / "shapes",
+    )
     output_root = run_dir / "map_agent"
     jobs_root = output_root / "jobs"
     cache_root = output_root / "page_cache"
@@ -149,7 +163,10 @@ def run_report_maps(
     generated_names = {
         "source_map", "surface_preview", "surface_clean_preview", "pixel_grid",
         "pixel_contours", "interpolated_contours", "local_cps3", "local_xyz",
-        "local_export_metadata",
+        "local_export_metadata", "georef_raster", "georef_world_file",
+        "georef_projection", "georef_footprint", "georef_metrics",
+        "georef_package", "georef_delivery", "georef_cps3", "georef_xyz",
+        "georef_grid_projection",
     }
     for item in existing_result.get("artifacts", []):
         if (
@@ -170,6 +187,7 @@ def run_report_maps(
     jobs = []
     artifacts = []
     issues = []
+    max_workers = max(1, int(workers))
 
     def checkpoint(status: str) -> dict:
         statuses = [job["status"] for job in jobs if job["status"] != "duplicate"]
@@ -205,6 +223,7 @@ def run_report_maps(
                 "failed": statuses.count("failed"),
                 "reused": sum(bool(job.get("reused")) for job in jobs),
                 "preserved_artifacts": len(preserved_artifacts),
+                "workers": max_workers,
             },
             "jobs": jobs,
             "artifacts": combined_artifacts,
@@ -214,6 +233,42 @@ def run_report_maps(
         temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         temporary.replace(output_root / "result.json")
         return payload
+
+    prefetched_results: dict[str, tuple[dict, bool]] = {}
+    prefetched_errors: dict[str, Exception] = {}
+
+    executor_type = ProcessPoolExecutor if pipeline_runner is run_pipeline else ThreadPoolExecutor
+    with executor_type(
+        max_workers=max_workers,
+    ) as executor:
+        future_pages = {}
+        for page in map_pages(manifest):
+            page_id = str(page.get("id") or "unknown")
+            try:
+                source = prepare_page_image(page, source_root, cache_root)
+                job_dir = jobs_root / _safe_page_id(page_id)
+                result = reusable_result(job_dir / "pipeline_result.json", source)
+                if result is not None:
+                    prefetched_results[page_id] = (result, True)
+                    continue
+                future = executor.submit(
+                    pipeline_runner,
+                    source,
+                    job_dir,
+                    ocr_api_url=ocr_api_url,
+                    inventory_id=inventory_id,
+                    survey_shape_path=survey_shape_path,
+                    try_raster_georeference=page.get("content_type") == "map",
+                )
+                future_pages[future] = page_id
+            except Exception as error:
+                prefetched_errors[page_id] = error
+        for future in as_completed(future_pages):
+            page_id = future_pages[future]
+            try:
+                prefetched_results[page_id] = (future.result(), False)
+            except Exception as error:
+                prefetched_errors[page_id] = error
 
     checkpoint("running")
     for page in map_pages(manifest):
@@ -227,16 +282,9 @@ def run_report_maps(
                 continue
             fingerprints.append(fingerprint)
             job_dir = jobs_root / _safe_page_id(page_id)
-            result = reusable_result(job_dir / "pipeline_result.json", source)
-            reused = result is not None
-            if result is None:
-                result = pipeline_runner(
-                    source,
-                    job_dir,
-                    ocr_api_url=ocr_api_url,
-                    inventory_id=inventory_id,
-                    survey_shape_path=survey_shape_path,
-                )
+            if page_id in prefetched_errors:
+                raise prefetched_errors[page_id]
+            result, reused = prefetched_results[page_id]
             routed_type = str(page.get("content_type") or "map")
             effective_status = str(result.get("status"))
             effective_quality = dict(result.get("quality") or {})
@@ -291,6 +339,26 @@ def run_report_maps(
                                 "page_id": page_id,
                             }
                         )
+                for name, label in (
+                    ("georef_raster", "Геопривязанный исходный растр"),
+                    ("georef_world_file", "World file"),
+                    ("georef_projection", "Система координат PRJ"),
+                    ("georef_footprint", "Контур покрытия"),
+                    ("georef_metrics", "Метрики геопривязки"),
+                    ("georef_package", "Архив привязки ArcGIS / Petrel"),
+                ):
+                    path = result.get("artifacts", {}).get(name)
+                    if path:
+                        artifacts.append(
+                            {
+                                "name": name,
+                                "label": f"{label} · {source.name}",
+                                "path": path,
+                                "media_type": mimetypes.guess_type(path)[0]
+                                or "application/octet-stream",
+                                "page_id": page_id,
+                            }
+                        )
         except Exception as error:
             jobs.append({"page_id": page_id, "status": "failed", "error": type(error).__name__})
             issues.append(
@@ -308,11 +376,12 @@ def run_report_maps(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Digitize classified map pages in one report")
     parser.add_argument("manifest", type=Path)
-    parser.add_argument("--ocr-api-url", default="http://127.0.0.1:18080")
+    parser.add_argument("--ocr-api-url", default=DEFAULT_SETTINGS.ocr_api_url)
+    parser.add_argument("--workers", type=int, default=4)
     args = parser.parse_args()
     print(
         json.dumps(
-            run_report_maps(args.manifest, args.ocr_api_url),
+            run_report_maps(args.manifest, args.ocr_api_url, workers=args.workers),
             ensure_ascii=False,
             indent=2,
         )

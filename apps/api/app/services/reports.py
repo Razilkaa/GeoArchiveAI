@@ -135,11 +135,38 @@ def artifact_payload(report_id: str) -> list[dict[str, Any]]:
                 "size_bytes": contact.stat().st_size,
             }
         )
+    for index, artifact in enumerate(artifacts):
+        artifact_id = f"artifact-{index}"
+        artifact["artifact_id"] = artifact_id
+        artifact["download_url"] = f"/api/reports/{report_id}/artifacts/{artifact_id}"
     return artifacts
+
+
+def report_artifact(report_id: str, artifact_id: str) -> tuple[Path, str]:
+    directory = report_run_dir(report_id).resolve()
+    records = artifact_payload(report_id)
+    record = next((item for item in records if item.get("artifact_id") == artifact_id), None)
+    if record is None:
+        raise HTTPException(404, "report_artifact_not_found")
+    path = resolved_artifact_path(record.get("path"))
+    manifest = read_json(directory / "job.json", {})
+    source_value = manifest.get("source_root")
+    source_root = Path(str(source_value)).resolve() if source_value else None
+    allowed = path.is_relative_to(directory) or (
+        source_root is not None and path.is_relative_to(source_root)
+    )
+    if not allowed or not path.is_file():
+        raise HTTPException(404, "report_artifact_not_found")
+    media_type = str(
+        record.get("media_type")
+        or MEDIA_TYPES.get(path.suffix.casefold(), "application/octet-stream")
+    )
+    return path, media_type
 
 
 def map_payload(report_id: str) -> dict[str, Any]:
     directory = report_run_dir(report_id)
+    bundle = read_json(directory / "result_bundle.json", {})
     manifest = read_json(directory / "job.json", {})
     source_root = Path(str(manifest.get("source_root") or ""))
     related_directories = related_map_run_dirs(report_id, source_root)
@@ -155,6 +182,10 @@ def map_payload(report_id: str) -> dict[str, Any]:
         str(job.get("page_id")): dict(job.get("quality") or {})
         for job in jobs
     }
+    routing_by_page = {
+        str(job.get("page_id")): str(job.get("routing_type") or "")
+        for job in jobs
+    }
     sources = []
     pages = []
     seen_pages = set()
@@ -165,13 +196,7 @@ def map_payload(report_id: str) -> dict[str, Any]:
                 pages.append(page)
                 seen_pages.add(key)
     for page in pages:
-        if page.get("content_type") != "map":
-            continue
-        if processed_status.get(str(page.get("id"))) in {
-            "not_applicable",
-            "failed",
-            "duplicate",
-        }:
+        if page.get("content_type") not in {"map", "chart"}:
             continue
         path = source_root / str(page.get("relative_path") or "")
         sources.append(
@@ -181,6 +206,9 @@ def map_payload(report_id: str) -> dict[str, Any]:
                 "path": str(path),
                 "media_type": MEDIA_TYPES.get(path.suffix.casefold(), "application/octet-stream"),
                 "exists": path.exists(),
+                "status": processed_status.get(str(page.get("id")), "pending"),
+                "quality": quality_by_page.get(str(page.get("id")), {}),
+                "content_type": page.get("content_type"),
             }
         )
 
@@ -192,12 +220,6 @@ def map_payload(report_id: str) -> dict[str, Any]:
             continue
         seen_artifacts.add(artifact_path)
         if artifact.get("name") == "source_map":
-            if processed_status.get(str(artifact.get("page_id"))) in {
-                "not_applicable",
-                "failed",
-                "duplicate",
-            }:
-                continue
             path = resolved_artifact_path(artifact.get("path"))
             if path.exists() and not any(item["path"] == str(path) for item in sources):
                 sources.insert(
@@ -209,6 +231,9 @@ def map_payload(report_id: str) -> dict[str, Any]:
                         "media_type": artifact.get("media_type")
                         or MEDIA_TYPES.get(path.suffix.casefold(), "application/octet-stream"),
                         "exists": True,
+                        "status": processed_status.get(str(artifact.get("page_id")), "pending"),
+                        "quality": quality_by_page.get(str(artifact.get("page_id")), {}),
+                        "content_type": routing_by_page.get(str(artifact.get("page_id"))),
                     }
                 )
             continue
@@ -240,8 +265,13 @@ def map_payload(report_id: str) -> dict[str, Any]:
             "digitized_pages": len(
                 {item.get("page_id") for item in digitized if item.get("page_id")}
             ),
+            "source_pages": len(
+                {item.get("page_id") for item in sources if item.get("page_id")}
+            ),
         },
         "issues": [issue for payload in results for issue in payload.get("issues", [])],
+        "structures": (bundle.get("entities") or {}).get("structures", []),
+        "horizons": (bundle.get("entities") or {}).get("horizons", []),
     }
 
 

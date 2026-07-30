@@ -15,6 +15,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from geoarchive.settings import load_settings
+
 from agent_contracts import atomic_json_write, utc_now
 from build_result_bundle import build_bundle
 from factory_agents import run_agents
@@ -30,6 +32,9 @@ from factory_runner import (
 from page_router import route_pages
 from report_factory import ensure_full_text_strategy
 from report_orchestrator import ReportOrchestrator
+
+
+DEFAULT_SETTINGS = load_settings()
 from services.map_digitizer.report_batch import report_map_signature, run_report_maps
 
 
@@ -43,14 +48,14 @@ class WorkerConfig:
     credentials_file: Path
     ragflow_token_file: Path
     dataset_id: str | None = None
-    ragflow_base_url: str = "https://ragflow-dev.finam.ru/api/v1"
-    proxy: str | None = "socks5h://127.0.0.1:7777"
+    ragflow_base_url: str = DEFAULT_SETTINGS.ragflow_url
+    proxy: str | None = DEFAULT_SETTINGS.proxy_url
     vision_model: str = "openai/gpt-4o-mini"
     agent_model: str = "openai/gpt-4o-mini"
     vision_workers: int = 4
     router_batch_size: int = 12
     paddleocr: Path | None = None
-    ocr_api_url: str | None = "http://127.0.0.1:18080"
+    ocr_api_url: str | None = DEFAULT_SETTINGS.ocr_api_url
     allow_external: bool = True
     enable_enrichment: bool = False
     force: set[str] = field(default_factory=set)
@@ -362,7 +367,9 @@ class JobWorker:
                         "map_digitization",
                         self._maps_valid,
                         lambda: run_report_maps(
-                            self.manifest_path, str(self.config.ocr_api_url)
+                            self.manifest_path,
+                            str(self.config.ocr_api_url),
+                            workers=self.config.vision_workers,
                         ),
                         False,
                     ),
@@ -434,18 +441,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run resumable end-to-end report jobs")
     parser.add_argument("report_ids", nargs="*")
     parser.add_argument("--all", action="store_true", dest="all_reports")
-    parser.add_argument("--runs-root", type=Path, default=Path(__file__).parents[1] / "runs")
-    parser.add_argument("--credentials-file", type=Path, default=Path(__file__).parents[1] / "secrets" / "tokent.txt")
-    parser.add_argument("--token-file", type=Path, default=Path(__file__).parents[1] / "secrets" / "ragflow_token.txt")
+    parser.add_argument("--runs-root", type=Path, default=DEFAULT_SETTINGS.runs_root)
+    parser.add_argument("--credentials-file", type=Path, default=DEFAULT_SETTINGS.llm_credentials_path)
+    parser.add_argument("--token-file", type=Path, default=DEFAULT_SETTINGS.ragflow_token_path)
     parser.add_argument("--dataset-id")
-    parser.add_argument("--ragflow-base-url", default="https://ragflow-dev.finam.ru/api/v1")
-    parser.add_argument("--proxy", default="socks5h://127.0.0.1:7777")
-    parser.add_argument("--vision-model", default="openai/gpt-4o-mini")
-    parser.add_argument("--agent-model", default="openai/gpt-4o-mini")
+    parser.add_argument("--ragflow-base-url", default=DEFAULT_SETTINGS.ragflow_url)
+    parser.add_argument("--proxy", default=DEFAULT_SETTINGS.proxy_url)
+    parser.add_argument("--vision-model", default=DEFAULT_SETTINGS.llm_model)
+    parser.add_argument("--agent-model", default=DEFAULT_SETTINGS.llm_model)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--router-batch-size", type=int, default=12)
     parser.add_argument("--paddleocr", type=Path)
-    parser.add_argument("--ocr-api-url", default="http://127.0.0.1:18080")
+    parser.add_argument("--ocr-api-url", default=DEFAULT_SETTINGS.ocr_api_url)
     parser.add_argument("--force", action="append", choices=ALL_STAGES, default=[])
     parser.add_argument("--enable-enrichment", action="store_true")
     args = parser.parse_args()

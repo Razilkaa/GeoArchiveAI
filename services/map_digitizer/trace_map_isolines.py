@@ -10,6 +10,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from services.map_digitizer.source_preserving_trace import trace_source_geometry
+from services.map_digitizer.survey_profiles import build_survey_profile_mask
 
 
 def imread_gray(path: Path) -> np.ndarray:
@@ -171,6 +172,134 @@ def stitch_polylines(
     return [line.tolist() for line in lines]
 
 
+def furniture_regions(
+    readings_path: Path | None, width: int, height: int
+) -> list[tuple[float, float, float, float]]:
+    """Bounding boxes of legend/stamp text clusters in the bottom sheet band.
+
+    Legend sample lines sit to the left of their captions, so each cluster box
+    is expanded further left than in other directions.
+    """
+    if not readings_path or not readings_path.exists():
+        return []
+    try:
+        payload = json.loads(readings_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    centers = []
+    for line in payload.get("lines") or []:
+        polygon = np.asarray(line.get("polygon") or [], dtype=float)
+        if polygon.shape != (4, 2):
+            continue
+        # Legend and stamp are made of words; map annotations are numbers.
+        text = str(line.get("text", ""))
+        if sum(char.isalpha() for char in text) < 4:
+            continue
+        center = polygon.mean(axis=0)
+        if center[1] >= height * 0.72:
+            centers.append(center)
+    if len(centers) < 8:
+        return []
+    points = np.asarray(centers)
+    radius = min(width, height) * 0.05
+    parent = list(range(len(points)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    for left, right in cKDTree(points).query_pairs(radius):
+        parent[find(right)] = find(left)
+    clusters: dict[int, list[int]] = {}
+    for index in range(len(points)):
+        clusters.setdefault(find(index), []).append(index)
+    regions = []
+    for indices in clusters.values():
+        if len(indices) < 8:
+            continue
+        cluster = points[indices]
+        low = cluster.min(axis=0)
+        high = cluster.max(axis=0)
+        pad = min(width, height) * 0.015
+        regions.append(
+            (
+                float(low[0] - width * 0.06),
+                float(low[1] - pad),
+                float(high[0] + pad),
+                float(high[1] + pad),
+            )
+        )
+    return regions
+
+
+def drop_furniture_polylines(
+    polylines: list[list[list[float]]],
+    regions: list[tuple[float, float, float, float]],
+    width: int,
+) -> tuple[list[list[list[float]]], int]:
+    if not regions:
+        return polylines, 0
+    kept = []
+    dropped = 0
+    for line in polylines:
+        points = np.asarray(line, dtype=float)
+        length = float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
+        inside = np.zeros(len(points), dtype=bool)
+        for x_min, y_min, x_max, y_max in regions:
+            inside |= (
+                (points[:, 0] >= x_min)
+                & (points[:, 0] <= x_max)
+                & (points[:, 1] >= y_min)
+                & (points[:, 1] <= y_max)
+            )
+        # Real isolines that merely clip a corner of the legend are long and
+        # mostly outside; legend samples and stamp remnants are short and
+        # mostly inside.
+        if length < width * 0.15 and float(inside.mean()) > 0.5:
+            dropped += 1
+            continue
+        kept.append(line)
+    return kept, dropped
+
+
+def drop_zigzag_polylines(
+    polylines: list[list[list[float]]],
+    *,
+    minimum_reversals: int = 2,
+    maximum_rate: float = 3.5,
+) -> tuple[list[list[list[float]]], int]:
+    """Drop map decoration that skeletonized into a zigzag.
+
+    Fault hatching, tectonic X-marks and correlation-loss ticks are dense
+    packets of short strokes; stitching walks them into a path that reverses
+    direction repeatedly. An authored isoline curves smoothly and practically
+    never turns back on itself, so repeated sharp reversals per unit length
+    identify decoration without touching real linework.
+    """
+    kept = []
+    dropped = 0
+    for line in polylines:
+        points = np.asarray(line, dtype=float)
+        segments = np.diff(points, axis=0)
+        lengths = np.linalg.norm(segments, axis=1)
+        usable = lengths > 2.0
+        segments, lengths = segments[usable], lengths[usable]
+        if len(segments) < 3:
+            kept.append(line)
+            continue
+        headings = np.arctan2(segments[:, 1], segments[:, 0])
+        turns = np.abs((np.diff(headings) + np.pi) % (2.0 * np.pi) - np.pi)
+        reversals = int(np.sum(turns > np.deg2rad(60.0)))
+        rate = reversals / max(1.0, float(lengths.sum())) * 1000.0
+        if reversals >= minimum_reversals and rate >= maximum_rate:
+            dropped += 1
+            continue
+        kept.append(line)
+    return kept, dropped
+
+
 def line_labels(readings_path: Path | None) -> list[dict]:
     if not readings_path or not readings_path.exists():
         return []
@@ -200,13 +329,63 @@ def trace(
 ) -> Path:
     original = imread_gray(source)
     height, width = original.shape
-    geometry = trace_source_geometry(original)
+    # Dashed "неуверенные" isolines survive as short stitched fragments; the
+    # conservative default length threshold discarded whole components of them.
+    # Recovering that linework is safe now that decoration is rejected by shape
+    # (zigzag reversals) and by crossing the isoline field, not by length alone.
+    geometry = trace_source_geometry(original, output_length_factor=60.0)
     polylines = geometry["polylines"]
+    furniture = furniture_regions(readings_path, width, height)
+    polylines, furniture_dropped = drop_furniture_polylines(
+        polylines, furniture, width
+    )
+    polylines, zigzag_dropped = drop_zigzag_polylines(polylines)
     profile_mask = geometry["profile_mask"]
     isolines = geometry["isoline_mask"]
     fragment_count = geometry["fragment_count"]
     profile_segments = geometry["profile_segments"]
-    survey_profiles = {"status": "deferred_until_georeferencing"}
+    # Project the archived survey network onto the scan by inventory number and
+    # strip confirmed profile linework before any isoline gets vectorized: a
+    # profile leaking into the isoline set becomes a false valued contour later.
+    survey_profiles = {"status": "not_requested"}
+    if (
+        inventory_id
+        and survey_shape_path is not None
+        and Path(survey_shape_path).exists()
+        and readings_path is not None
+        and readings_path.exists()
+    ):
+        ocr_payload = json.loads(readings_path.read_text(encoding="utf-8"))
+        combined_ink = cv2.bitwise_or(isolines, profile_mask)
+        survey = build_survey_profile_mask(
+            combined_ink,
+            ocr_payload,
+            inventory_id=str(inventory_id),
+            shape_path=Path(survey_shape_path),
+            scale=1.0,
+            output_dir=output_dir,
+        )
+        survey_mask = survey.pop("mask", None)
+        survey_profiles = survey
+        if survey.get("status") == "applied" and survey_mask is not None:
+            corridor = cv2.dilate(
+                survey_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+            )
+            kept = []
+            survey_dropped = 0
+            for line in polylines:
+                points = np.asarray(line, dtype=float)
+                step = max(1, len(points) // 200)
+                cols = np.clip(np.round(points[::step, 0]).astype(int), 0, width - 1)
+                rows = np.clip(np.round(points[::step, 1]).astype(int), 0, height - 1)
+                if float(np.mean(corridor[rows, cols] > 0)) > 0.6:
+                    survey_dropped += 1
+                    continue
+                kept.append(line)
+            polylines = kept
+            survey_profiles["survey_polylines_dropped"] = survey_dropped
+            profile_mask = cv2.bitwise_or(profile_mask, survey_mask)
+            isolines = cv2.bitwise_and(isolines, cv2.bitwise_not(survey_mask))
 
     preview_scale = min(1.0, 3000.0 / max(height, width))
     preview = cv2.resize(
@@ -277,6 +456,9 @@ def trace(
         "vector_polylines": len(polylines),
         "vector_fragments_before_stitching": fragment_count,
         "dash_links": geometry["dash_links"],
+        "furniture_regions": len(furniture),
+        "furniture_polylines_dropped": furniture_dropped,
+        "zigzag_polylines_dropped": zigzag_dropped,
         "trace_method": "source_preserving_full_resolution",
         "isoline_value_labels": len(labels),
         "assigned_value_labels": sum(len(value) for value in assignments.values()),

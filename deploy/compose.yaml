@@ -1,0 +1,111 @@
+name: geoarchive
+
+x-app-environment: &app-environment
+  GEOARCHIVE_ROOT: /app
+  GEOARCHIVE_DATA_ROOT: /data
+  GEOARCHIVE_SECRETS_ROOT: /run/secrets
+  GEOARCHIVE_RUNS_ROOT: /data/runs
+  GEOARCHIVE_INBOX_ROOT: /data/reports_inbox
+  GEOARCHIVE_STAGING_ROOT: /data/reports_staging
+  GEOARCHIVE_RESULTS_ROOT: /data/results
+  OCR_API_URL: http://ocr:8080
+  RAGFLOW_URL: ${RAGFLOW_URL:?Set RAGFLOW_URL in .env}
+  RAGFLOW_PROXY: ${RAGFLOW_PROXY:-}
+  RAGFLOW_VERIFY_TLS: ${RAGFLOW_VERIFY_TLS:-true}
+  RAGFLOW_RETRIEVAL_TIMEOUT_S: ${RAGFLOW_RETRIEVAL_TIMEOUT_S:-30}
+  RAGFLOW_RETRIEVAL_ATTEMPTS: ${RAGFLOW_RETRIEVAL_ATTEMPTS:-2}
+  RAGFLOW_RETRY_BACKOFF_S: ${RAGFLOW_RETRY_BACKOFF_S:-1}
+  RAGFLOW_PAGE_SIZE: ${RAGFLOW_PAGE_SIZE:-5}
+  RAGFLOW_SIMILARITY_THRESHOLD: ${RAGFLOW_SIMILARITY_THRESHOLD:-0.1}
+  RAGFLOW_INGEST_SIMILARITY_THRESHOLD: ${RAGFLOW_INGEST_SIMILARITY_THRESHOLD:-0.05}
+  RAGFLOW_VECTOR_SIMILARITY_WEIGHT: ${RAGFLOW_VECTOR_SIMILARITY_WEIGHT:-0.3}
+  RAGFLOW_TOP_K: ${RAGFLOW_TOP_K:-64}
+  GEOARCHIVE_LLM_MODEL: ${GEOARCHIVE_LLM_MODEL:-openai/gpt-4o-mini}
+  RAGFLOW_TOKEN_FILE: /run/secrets/ragflow_token.txt
+  LLM_CREDENTIALS_FILE: /run/secrets/tokent.txt
+  AUTO_INTAKE_ENABLED: ${AUTO_INTAKE_ENABLED:-true}
+  AUTO_MAX_REPORTS: ${AUTO_MAX_REPORTS:-2}
+  MAP_MAX_JOBS: ${MAP_MAX_JOBS:-2}
+  MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-32212254720}
+  JOB_EXECUTION_MODE: queue
+
+x-app-volumes: &app-volumes
+  - ${GEOARCHIVE_DATA_PATH:-../data}:/data
+  - ../secrets:/run/secrets:ro
+  - ../shapes:/app/shapes:ro
+
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+    restart: unless-stopped
+    ports:
+      - "${GEOARCHIVE_HTTP_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    restart: unless-stopped
+    environment:
+      <<: *app-environment
+    volumes: *app-volumes
+    depends_on:
+      ocr:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=4)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    restart: unless-stopped
+    command: ["python", "-m", "pipeline.queue_worker"]
+    working_dir: /app
+    environment:
+      <<: *app-environment
+      AUTO_INTAKE_ENABLED: "false"
+    volumes: *app-volumes
+    depends_on:
+      ocr:
+        condition: service_healthy
+
+  ocr:
+    build:
+      context: ../services/ocr
+      dockerfile: Dockerfile.production
+    restart: unless-stopped
+    environment:
+      OCR_DEVICE: gpu:0
+      OCR_LANGUAGE: ru
+      OCR_MODEL: PP-OCRv5
+      OCR_CONCURRENCY: "1"
+      NVIDIA_VISIBLE_DEVICES: ${OCR_GPU_DEVICE:-0}
+    volumes:
+      - ocr-models:/root/.paddlex
+    shm_size: 8gb
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
+      interval: 20s
+      timeout: 8s
+      retries: 15
+      start_period: 180s
+
+volumes:
+  ocr-models:
