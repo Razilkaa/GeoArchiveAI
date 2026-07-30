@@ -45,23 +45,6 @@ export type MapsPayload = {
   structures?: Entity[];
   horizons?: Entity[];
 };
-export type ProfileCrossing = {
-  key: string;
-  profiles: [string, string];
-  label: string;
-  map: [number, number];
-};
-export type ProfileCrossingsPayload = {
-  report_id: string;
-  page_id: string;
-  target_crs: string;
-  crossings: ProfileCrossing[];
-  raster_size?: [number, number];
-};
-export type ProfileAnchor = {
-  pixel: [number, number];
-  crossing_key: string;
-};
 export type Evidence = { evidence?: string[]; excerpt?: string; similarity?: number; document_name?: string };
 export type Answer = { answer: string; evidence?: Evidence[]; citation_qc?: { status?: string }; retrieval_latency_ms?: number; generation_latency_ms?: number };
 
@@ -79,17 +62,6 @@ export const api = {
   status: (id: string) => request<ReportStatus>(`/api/reports/${encodeURIComponent(id)}/status`),
   bundle: (id: string) => request<Bundle>(`/api/reports/${encodeURIComponent(id)}`),
   maps: (id: string) => request<MapsPayload>(`/api/reports/${encodeURIComponent(id)}/maps`),
-  profileCrossings: (id: string, pageId: string) => request<ProfileCrossingsPayload>(
-    `/api/reports/${encodeURIComponent(id)}/maps/profile-crossings?page_id=${encodeURIComponent(pageId)}`
-  ),
-  georeferenceMap: (id: string, pageId: string, anchors: ProfileAnchor[]) => request<Record<string, unknown>>(
-    `/api/reports/${encodeURIComponent(id)}/maps/georeference`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ page_id: pageId, anchors })
-    }
-  ),
   services: () => request<Record<string, unknown>>("/api/services"),
   ask: (id: string, question: string) => request<Answer>(`/api/reports/${encodeURIComponent(id)}/ask`, {
     method: "POST",

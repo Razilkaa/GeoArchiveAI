@@ -1,13 +1,12 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowUpRight, CheckCircle2, CircleAlert, Crosshair, Database,
+  ArrowUpRight, CheckCircle2, CircleAlert, Database,
   FileArchive, FileSearch, Layers3, LoaderCircle, Map, Search, Send, Upload, X
 } from "lucide-react";
-import { api, type MapArtifact, type ProfileAnchor } from "./api";
+import { api, type MapArtifact } from "./api";
 
 type Tab = "maps" | "rag" | "global";
-type MapMarker = { xPercent: number; yPercent: number; label: string };
 
 function basename(value?: string) {
   return (value || "Архивный отчёт").split(/[\\/]/).filter(Boolean).at(-1) || "Архивный отчёт";
@@ -26,15 +25,9 @@ function StatusDot({ status }: { status?: string }) {
 function MapCard({
   artifact,
   title,
-  onImageClick,
-  markers = [],
-  originalSize,
 }: {
   artifact?: MapArtifact;
   title: string;
-  onImageClick?: (pixel: [number, number], relative: [number, number]) => void;
-  markers?: MapMarker[];
-  originalSize?: [number, number];
 }) {
   const imageUrl = artifact?.preview_url || artifact?.download_url;
   return <div className="map-card">
@@ -44,60 +37,21 @@ function MapCard({
         Оригинал <ArrowUpRight size={14}/>
       </a> : null}
     </div>
-    {artifact && imageUrl ? <div className={`map-frame ${onImageClick ? "map-frame-clickable" : ""}`}>
+    {artifact && imageUrl ? <div className="map-frame">
       <div className="map-image-wrap">
-        <img src={imageUrl} alt={title} loading="lazy" decoding="async" onClick={event => {
-          if (!onImageClick) return;
-          const rect = event.currentTarget.getBoundingClientRect();
-          const relative: [number, number] = [
-            (event.clientX - rect.left) / rect.width,
-            (event.clientY - rect.top) / rect.height,
-          ];
-          const width = originalSize?.[0] || event.currentTarget.naturalWidth;
-          const height = originalSize?.[1] || event.currentTarget.naturalHeight;
-          onImageClick([relative[0] * width, relative[1] * height], relative);
-        }}/>
-        {markers.map((marker, index) => <span
-          className="map-anchor-marker"
-          key={`${marker.label}-${index}`}
-          style={{left: `${marker.xPercent}%`, top: `${marker.yPercent}%`}}
-        >{index + 1}</span>)}
+        <img src={imageUrl} alt={title} loading="lazy" decoding="async"/>
       </div>
     </div> : <div className="empty-map"><Map size={30}/><span>Результат ещё не сформирован</span></div>}
   </div>;
 }
 
 function MapsView({ reportId }: { reportId: string }) {
-  const queryClient = useQueryClient();
   const maps = useQuery({
     queryKey: ["maps", reportId],
     queryFn: () => api.maps(reportId),
     refetchInterval: 10_000,
   });
   const [page, setPage] = useState("");
-  const [anchorPage, setAnchorPage] = useState("");
-  const [georefOpen, setGeorefOpen] = useState(false);
-  const [crossingKey, setCrossingKey] = useState("");
-  const [anchors, setAnchors] = useState<(ProfileAnchor & MapMarker)[]>([]);
-  const crossings = useQuery({
-    queryKey: ["profile-crossings", reportId, anchorPage],
-    queryFn: () => api.profileCrossings(reportId, anchorPage),
-    enabled: georefOpen && Boolean(anchorPage),
-    retry: false,
-  });
-  const georeference = useMutation({
-    mutationFn: () => api.georeferenceMap(
-      reportId,
-      anchorPage,
-      anchors.map(item => ({pixel: item.pixel, crossing_key: item.crossing_key})),
-    ),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({queryKey: ["maps", reportId]});
-      setGeorefOpen(false);
-      setAnchors([]);
-      setCrossingKey("");
-    },
-  });
 
   if (maps.isLoading || !maps.data) {
     return <div className="loading"><LoaderCircle className="spin"/>Загружаем карты</div>;
@@ -111,10 +65,9 @@ function MapsView({ reportId }: { reportId: string }) {
     }
   });
   const digitizedPages = new Set(artifactsByPage.keys());
-  const pages = Array.from(new Set([
-    ...data.sources.filter(item => item.content_type === "map").map(item => item.page_id),
-    ...data.digitized.map(item => item.page_id),
-  ].filter(Boolean) as string[])).sort((left, right) => {
+  const pages = Array.from(new Set(
+    data.sources.map(item => item.page_id).filter(Boolean) as string[]
+  )).sort((left, right) => {
     const rank = (value: string) => digitizedPages.has(value) ? 0 : 1;
     return rank(left) - rank(right) || left.localeCompare(right, "ru");
   });
@@ -124,41 +77,20 @@ function MapsView({ reportId }: { reportId: string }) {
   const preview = artifacts.find(item =>
     ["surface_clean_preview", "surface_preview", "digitized_map", "georef_raster"].includes(item.name || "")
   );
+  const grid = artifacts.find(item => item.name === "georef_cps3")
+    || artifacts.find(item => item.name === "local_cps3");
+  const lines = artifacts.find(
+    item => item.name === "georef_digitized_isolines_by_level_cps3_lines"
+  );
   const downloads = [
-    ["georef_cps3", "Привязанный grid CPS-3"],
-    ["georef_digitized_isolines_by_level_cps3_lines", "Привязанные линии CPS-3"],
-    ["georef_digitized_isolines_by_level", "Привязанные линии GeoPackage"],
-    ["georef_package", "Пакет ArcGIS / Petrel"],
-    ["local_cps3", "Grid CPS-3 · локальные координаты"],
-    ["local_cps3_lines", "Линии CPS-3 · локальные координаты"],
-    ["pixel_contours", "Линии GeoJSON · локальные координаты"],
-  ].map(([name, label]) => {
-    const artifact = artifacts.find(item => item.name === name);
-    return artifact ? {...artifact, downloadLabel: label} : undefined;
-  }).filter(Boolean) as (MapArtifact & {downloadLabel: string})[];
-
-  const crossingOptions = crossings.data?.crossings || [];
-  const selectedCrossingKey = crossingKey
-    || crossingOptions.find(item => !anchors.some(anchor => anchor.crossing_key === item.key))?.key
-    || "";
-  const beginGeoreference = () => {
-    setAnchorPage(selected);
-    setAnchors([]);
-    setCrossingKey("");
-    setGeorefOpen(true);
-  };
-  const placeAnchor = (pixel: [number, number], relative: [number, number]) => {
-    const crossing = crossingOptions.find(item => item.key === selectedCrossingKey);
-    if (!crossing || anchors.some(item => item.crossing_key === crossing.key)) return;
-    setAnchors(current => [...current, {
-      pixel,
-      crossing_key: crossing.key,
-      label: crossing.label,
-      xPercent: relative[0] * 100,
-      yPercent: relative[1] * 100,
-    }]);
-    setCrossingKey("");
-  };
+    grid ? {
+      ...grid,
+      downloadLabel: grid.name === "georef_cps3"
+        ? "Привязанный Grid CPS-3"
+        : "Grid CPS-3 · локальные координаты",
+    } : undefined,
+    lines ? {...lines, downloadLabel: "Привязанные линии CPS-3"} : undefined,
+  ].filter(Boolean) as (MapArtifact & {downloadLabel: string})[];
 
   return <div className="maps-view">
     <div className="toolbar">
@@ -174,14 +106,7 @@ function MapsView({ reportId }: { reportId: string }) {
         </small>
       </div>
       <div className="map-toolbar-actions">
-        {source ? <button className="secondary-button" onClick={beginGeoreference}>
-          <Crosshair size={15}/>Привязать по 2 точкам
-        </button> : null}
-        {pages.length ? <select value={selected} onChange={event => {
-          setPage(event.target.value);
-          setGeorefOpen(false);
-          setAnchors([]);
-        }}>
+        {pages.length ? <select value={selected} onChange={event => setPage(event.target.value)}>
           {pages.map(value => {
             const item = data.sources.find(candidate => candidate.page_id === value);
             return <option key={value} value={value}>
@@ -192,37 +117,9 @@ function MapsView({ reportId }: { reportId: string }) {
       </div>
     </div>
 
-    {georefOpen ? <div className="georef-panel">
-      <div>
-        <span className="eyebrow">Привязка карты</span>
-        <b>Выберите пересечение профилей и отметьте его на исходнике</b>
-        <small>{crossings.data ? `CRS: ${crossings.data.target_crs}` : "Читаем номера профилей…"}</small>
-      </div>
-      {crossings.isLoading ? <LoaderCircle className="spin"/> : crossingOptions.length ? <>
-        <select value={selectedCrossingKey} onChange={event => setCrossingKey(event.target.value)}>
-          {crossingOptions.map(item => <option value={item.key} key={item.key}>{item.label}</option>)}
-        </select>
-        <div className="georef-anchors">
-          {anchors.map((item, index) => <span key={item.crossing_key}>{index + 1}. {item.label}</span>)}
-        </div>
-        <button disabled={anchors.length < 2 || georeference.isPending} onClick={() => georeference.mutate()}>
-          {georeference.isPending ? <LoaderCircle className="spin"/> : <Crosshair/>}Привязать
-        </button>
-        <button className="text-button" onClick={() => {setGeorefOpen(false); setAnchors([]);}}>Отмена</button>
-      </> : <span className="error-box">На листе не найдены пересечения профилей.</span>}
-      {crossings.error ? <span className="error-box">{crossings.error.message}</span> : null}
-      {georeference.error ? <span className="error-box">{georeference.error.message}</span> : null}
-    </div> : null}
-
     {!pages.length ? <div className="empty"><Layers3/><h3>Карты не обнаружены</h3></div> : <>
       <div className="map-grid">
-        <MapCard
-          artifact={source}
-          title={georefOpen ? "Исходник · поставьте опорную точку" : "Исходник"}
-          onImageClick={georefOpen ? placeAnchor : undefined}
-          markers={anchors}
-          originalSize={crossings.data?.raster_size}
-        />
+        <MapCard artifact={source} title="Исходник"/>
         <MapCard artifact={preview} title="Результат оцифровки"/>
       </div>
       <div className="downloads">
