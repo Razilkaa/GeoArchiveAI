@@ -109,8 +109,14 @@ function MapsView({ reportId }: { reportId: string }) {
         {pages.length ? <select value={selected} onChange={event => setPage(event.target.value)}>
           {pages.map(value => {
             const item = data.sources.find(candidate => candidate.page_id === value);
+            const location = (item?.path || "")
+              .split(/[\\/]/)
+              .filter(Boolean)
+              .slice(-2)
+              .join(" / ");
+            const sheet = item?.page_number ? `Лист ${item.page_number}` : value;
             return <option key={value} value={value}>
-              {item?.page_number ? `Лист ${item.page_number}` : value}
+              {pages.length > 1 && location ? `${sheet} · ${location}` : sheet}
             </option>;
           })}
         </select> : null}
