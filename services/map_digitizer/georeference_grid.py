@@ -82,6 +82,61 @@ def georeference_grid(
     name: str = "digitized_surface",
 ) -> dict:
     matrix, control_quality = fit_similarity(control_points)
+    return _export_transformed_grid(
+        pixel_grid_path,
+        matrix,
+        output_dir,
+        target_crs=target_crs,
+        cell_size=cell_size,
+        name=name,
+        transform_metadata={
+            "transform_model": "two_point_similarity",
+            "control_points": control_points,
+            "control_quality": control_quality,
+            "independently_checked": len(control_points) >= 3,
+        },
+    )
+
+
+def georeference_grid_affine(
+    pixel_grid_path: Path,
+    affine_matrix: np.ndarray,
+    output_dir: Path,
+    *,
+    target_crs: str,
+    cell_size: float | None = None,
+    name: str = "digitized_surface",
+    validation: dict | None = None,
+) -> dict:
+    """Resample a pixel grid with an independently validated affine transform."""
+    matrix = np.asarray(affine_matrix, dtype=float)
+    if matrix.shape != (2, 3) or not np.isfinite(matrix).all():
+        raise ValueError("Affine matrix must be a finite 2x3 array")
+    return _export_transformed_grid(
+        pixel_grid_path,
+        matrix,
+        output_dir,
+        target_crs=target_crs,
+        cell_size=cell_size,
+        name=name,
+        transform_metadata={
+            "transform_model": "validated_affine",
+            "validation": validation or {},
+            "independently_checked": True,
+        },
+    )
+
+
+def _export_transformed_grid(
+    pixel_grid_path: Path,
+    matrix: np.ndarray,
+    output_dir: Path,
+    *,
+    target_crs: str,
+    cell_size: float | None,
+    name: str,
+    transform_metadata: dict,
+) -> dict:
     payload = np.load(pixel_grid_path)
     source_x, source_y, source_z = payload["x"], payload["y"], payload["z"]
     source_grid_x, source_grid_y = np.meshgrid(source_x, source_y)
@@ -122,18 +177,19 @@ def georeference_grid(
     prj_path.write_text(crs.to_wkt("WKT1_ESRI"), encoding="ascii")
 
     finite_target = target_z[np.isfinite(target_z)]
-    independently_checked = len(control_points) >= 3
-    accepted = control_quality["p95_m"] <= max(1.0, cell_size * 0.5)
+    control_quality = transform_metadata.get("control_quality") or {}
+    independently_checked = bool(transform_metadata.get("independently_checked"))
+    accepted = independently_checked and (
+        not control_quality
+        or float(control_quality.get("p95_m", 0.0)) <= max(1.0, cell_size * 0.5)
+    )
     metadata = {
         "status": "accepted" if accepted else "review",
         "source": str(pixel_grid_path),
         "target_crs": crs.to_string(),
         "target_crs_name": crs.name,
-        "transform_model": "two_point_similarity",
+        **transform_metadata,
         "affine_matrix": matrix.tolist(),
-        "control_points": control_points,
-        "control_quality": control_quality,
-        "independently_checked": independently_checked,
         "cell_size_m": float(cell_size),
         "columns": len(target_x),
         "rows": len(target_y),

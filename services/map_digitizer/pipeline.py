@@ -266,6 +266,7 @@ def run_pipeline(
                     survey_shape_path,
                     output_dir / "georef",
                     raster_products=[image_path],
+                    grid_products=[Path(reconstruction["files"]["grid"])],
                 ),
             )
             result["stages"]["georeference"]["metrics"] = georef

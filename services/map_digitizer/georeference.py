@@ -28,6 +28,7 @@ from shapely.affinity import affine_transform
 
 from services.map_digitizer.profile_value_propagation import extract_profile_lines
 from services.map_digitizer.export_cps3_lines import write_cps3_lines
+from services.map_digitizer.georeference_grid import georeference_grid_affine
 from services.map_digitizer.survey_profiles import (
     _profile_number_column,
     profile_number_variants,
@@ -314,6 +315,7 @@ def georeference(
     *,
     products: list[Path] | None = None,
     point_csv_products: list[Path] | None = None,
+    grid_products: list[Path] | None = None,
     raster_products: list[Path] | None = None,
 ) -> dict:
     mask = cv2.imdecode(
@@ -741,6 +743,30 @@ def georeference(
         exported[product.stem] = str(target)
 
     used = np.asarray(pairs, dtype=object)[keep]
+    for product in grid_products or []:
+        if not product.exists():
+            continue
+        grid_export = georeference_grid_affine(
+            product,
+            matrix,
+            output_dir,
+            target_crs=str(crs),
+            name="digitized_surface_ck42",
+            validation={
+                "used_correspondences": int(keep.sum()),
+                "residual_p90_m": residual_p90,
+                "crossing_residual_p90_m": crossing_p90,
+                "leave_one_out_p90_m": leave_one_out_p90,
+            },
+        )
+        exported.update(
+            {
+                "cps3": grid_export["files"]["cps3"],
+                "xyz": grid_export["files"]["xyz"],
+                "grid_projection": grid_export["files"]["prj"],
+                "grid_metadata": str(output_dir / "digitized_surface_ck42.json"),
+            }
+        )
     metrics = {
         "profile_lines": len(lines),
         "number_labels": len(labels),
