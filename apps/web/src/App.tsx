@@ -331,7 +331,7 @@ function App() {
             key={item.report_id}
             onClick={() => {setSelected(item.report_id); setTab("maps");}}
           >
-            <FileArchive size={17}/><span><b>{item.report_id}</b><small>{basename(item.source_root)}</small></span>
+            <FileArchive size={17}/><span><b>{item.report_id}</b><small>{item.summary?.title || basename(item.source_root)}</small></span>
             <StatusDot status={item.worker_status}/>
           </button>)}
       </nav>
@@ -340,7 +340,7 @@ function App() {
     <main>
       {report ? <>
         <header className="topbar">
-          <div><span className="breadcrumb">Фонд · {report.report_id}</span><h1>{basename(report.source_root)}</h1><p>{report.summary?.page_count || 0} страниц</p></div>
+          <div><span className="breadcrumb">Фонд · {report.report_id}</span><h1>{report.summary?.title || basename(report.source_root)}</h1><p>{report.summary?.page_count || 0} страниц</p></div>
           <StatusDot status={report.worker_status}/>
         </header>
         <div className="tabs">{tabs.map(([key, Icon, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}><Icon size={17}/>{label}</button>)}</div>

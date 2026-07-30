@@ -2,7 +2,7 @@ export type Stage = { status?: string; detail?: string; error?: string };
 export type ReportListItem = {
   report_id: string;
   source_root?: string;
-  summary?: { page_count?: number };
+  summary?: { page_count?: number; title?: string };
   worker_status?: string;
   operator_status?: string;
 };
