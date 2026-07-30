@@ -44,7 +44,19 @@ SYSTEM_PROMPT = """Ты evidence-ассистент по архивному ге
 Если данных недостаточно, прямо скажи об этом. Учитывай OCR-ошибки и не исправляй
 неоднозначные имена без пояснения. Проверенные структурированные факты имеют
 приоритет над сырым OCR-текстом, особенно для идентификаторов скважин и названий.
+Отвечай на точное отношение из вопроса: «передать под глубокое бурение»,
+«провести детальные работы» и «продолжить поисковые работы» — разные рекомендации.
+Соседство пунктов в одном списке не делает их объектами одного и того же действия.
+В перечень включай только объекты, для которых запрошенное действие сказано прямо.
 Ответ должен быть кратким и на русском языке."""
+
+
+def needs_relation_guard(question: str) -> bool:
+    normalized = question.casefold().replace("ё", "е")
+    return any(
+        marker in normalized
+        for marker in ("рекоменд", "бурен", "передать", "подготов", "требует")
+    )
 
 
 def read_key_values(path: Path) -> dict[str, str]:
@@ -380,6 +392,29 @@ class ReportAnswerService:
                     model=self.model,
                     temperature=0,
                     messages=repair_messages,
+                )
+                answer = (response.choices[0].message.content or "").strip()
+            if structured and needs_relation_guard(question):
+                generation_attempts += 1
+                semantic_messages = messages + [
+                    {"role": "assistant", "content": answer},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Семантическая проверка ответа. Выдели точное действие или "
+                            "отношение из вопроса и оставь только те объекты, для которых "
+                            "это же действие прямо подтверждено structured facts или "
+                            "фрагментом. Не объединяй соседние пункты списка с разными "
+                            "глаголами. Например, рекомендация детальных работ не означает "
+                            "рекомендацию глубокого бурения. Верни только исправленный "
+                            "финальный ответ с допустимыми ссылками."
+                        ),
+                    },
+                ]
+                response = self.llm.chat.completions.create(
+                    model=self.model,
+                    temperature=0,
+                    messages=semantic_messages,
                 )
                 answer = (response.choices[0].message.content or "").strip()
         except Exception as error:
